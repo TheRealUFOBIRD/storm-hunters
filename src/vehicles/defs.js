@@ -2,6 +2,7 @@
 import { SPECS } from './specs.js';
 import { CarKit, ST, rbox, box, cyl, sph, torus, tube, pipe, lathe, extrude, hexa, roundedPath, Surf } from './kit.js';
 import { sdBox, sdRound, sdPoly, rim, curve1 } from './mesh.js';
+import { register } from './defs2.js';
 import { lerp, smoothstep, clamp } from '../core/math.js';
 void sph; void torus; void extrude; void hexa; void Surf; void sdPoly; void rim; void curve1; void lathe; void box; void sdBox;
 
@@ -64,14 +65,15 @@ DEF.prairie = {
     for (const sx of [1]) K.trim.both(tube([[0.0, L.top(1.06, 0) + 0.002, -1.07], [0.4, L.top(0.97, 0.4) + 0.002, -0.985], [0.7, L.top(0.76, 0.7) - 0.002, -0.765]], 0.016, 6, 14), ST.black); void 0;
     K.wipers(0.98, 1.0); K.plateAt(-2.21, 0.7, 1, 0.08); K.exhaust(0.5, 0.262, -2.03); K.trim.add(rbox(0.1, 0.1, 0.012, 0.02).at(0, 0.605, -2.245, 0, 0, Math.PI / 4), ST.chrome); K.trim.add(rbox(0.06, 0.06, 0.014, 0.012).at(0, 0.83, 2.195, 0, 0, Math.PI / 4), ST.chrome);
     K.trim.add(rbox(0.92, 0.02, 0.14, 0.009, 2).map((p) => { p[1] -= p[0] * p[0] * 0.1; p[2] -= p[0] * p[0] * 0.16; }).at(0, 1.42, 1.2, 0.12, 0, 0), ST.paint); K.trim.add(rbox(0.3, 0.014, 0.012, 0.004).at(0, 1.406, 1.266), ST.brake); K.antenna(0.0, 1.42, -1.1, 0.24, 0.0025);
-    K.interior({ f: 0.62, y: 0.955, w: 0.71, floor: 0.27, seatF: -0.18, seatY: 0.5, seatX: 0.36, rearF: -0.84, rvm: [0.2, 1.3] }); underside(K);
+    K.interior({ f: 0.62, y: 0.955, w: 0.71, floor: 0.27, seatF: -0.38, seatY: 0.5, seatX: 0.36, rearF: -0.84, rvm: [0.2, 1.3] }); underside(K);
     // chase kit: magnetic whip, dash cam, roof anemometer on a small mag mount
     K.antenna(0.46, 1.43, -0.85, 1.05); K.antenna(-0.4, 1.455, -0.75, 0.7); K.anemometer(0.0, 1.462, -0.6, 0.34); K.beacon(-0.3, 1.46, -0.25, ST.barA);
-    K.mounts = { roof: [0, 1.47, -0.4], dash: [0, 1.02, 0.55], bed: [0, 0.85, -1.6], driver: [-0.36, 1.135, 0.02] };
+    K.lampPos = [[0.72, 0.63, 2.1]]; K.tailPos = [0.72, 0.92, -2.12];
+    K.mounts = { roof: [0, 1.47, -0.4], dash: [0, 1.02, 0.55], bed: [0, 0.85, -1.6], driver: [-0.36, 1.13, -0.22] };
   },
 };
 
-//@@MORE@@
+register(DEF, underside);
 export const BUILDERS = DEF;
 export function buildKit(type, lod) { const K = new CarKit(SPECS[type], {}, lod); DEF[type].build(K); return K; }
 void clamp; void cyl; void sdRound;

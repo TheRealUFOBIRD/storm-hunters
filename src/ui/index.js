@@ -29,7 +29,7 @@ export async function create(ctx) {
       const from = curName; if (cur) { cur.close?.(); hide(cur); } if (s.root || o.replace) stack.length = 0; else if (from && from !== name && !o.noStack) { const i = stack.indexOf(name); if (i >= 0) stack.splice(i); else stack.push(from); }
       cur = s; curName = name; ui.screen = name; s.el.hidden = false; s.el.classList.remove('in'); void s.el.offsetWidth; s.el.classList.add('in'); if (s.pause) lastPause = performance.now();
       if (s.pause && ctx.state === 'playing' && (ctx.net?.role ?? 'solo') === 'solo') { ctx.state = 'paused'; pausedByUs = true; }
-      ui.block(); s.open?.(o); s.update?.(0.016); ctx.events.emit('ui:screen', { name, open: true }); if (s.focus && (ctx.input.usingPad || lastInput === 'key')) setTimeout(() => cur === s && s.el.querySelector(s.focus)?.focus({ preventScroll: true }), 30);
+      ui.block(); try { s.open?.(o); s.update?.(0.016); } catch (e) { console.error('[ui ' + name + ']', e?.stack || e); } ctx.events.emit('ui:screen', { name, open: true }); if (s.focus && (ctx.input.usingPad || lastInput === 'key')) setTimeout(() => cur === s && s.el.querySelector(s.focus)?.focus({ preventScroll: true }), 30);
     },
     closeScreen() {
       if (!cur) return; if (cur.sticky) return; const prev = stack.pop(); if (prev && MAKE[prev]) { const n = curName; void n; ui.openScreen(prev, { noStack: true }); return; } if (ctx.state === 'menu' && curName !== 'main') { ui.openScreen('main'); return; } ui.forceClose(); ui.capture();

@@ -441,7 +441,7 @@ export class VehicleBody {
     const v = this.v, w = this.w, vn = (v.x + w.y * rz - w.z * ry) * nx + (v.y + w.z * rx - w.x * rz) * ny + (v.z + w.x * ry - w.y * rx) * nz, W = this.env.world, x = this.p.x + rx, y = this.p.y + ry, z = this.p.z + rz;
     if (k.breakSpeed > 0 && k.breakSpeed < 1e4 && -vn > k.breakSpeed && !k.broken) {
       const mc = Math.max(5, k.mass || 60), J = Math.min(-vn * 0.85, -vn) / (this.invK(rx, ry, rz, nx, ny, nz) + 1 / mc); k.broken = true; // local guard until world marks it
-      const vv = -vn; this.addImpulse(nx * J, ny * J * 0.3, nz * J, x, y, z); U.set(-nx * J, Math.abs(J) * 0.25, -nz * J); W.hitCollider?.(k.id, U); this.env.fx?.spark?.(U.set(x, y, z), N.set(nx, ny, nz)); this.impact(Math.min(vv, J / this.spec.mass * 1.6), x, y, z, nx, ny, nz, k.kind || 'break'); return true;
+      const vv = -vn; this.addImpulse(nx * J, ny * J * 0.3, nz * J, x, y, z); U.set(-nx * J, Math.abs(J) * 0.25, -nz * J); W.hitCollider?.(k.id, U); try { this.env.fx?.spark?.(U.set(x, y, z), 16); } catch { /* optional */ } this.impact(Math.min(vv, J / this.spec.mass * 1.6), x, y, z, nx, ny, nz, k.kind || 'break'); return true;
     }
     const j = this.resolve(rx, ry, rz, nx, ny, nz, pen, 0.18, 0.35, dt); if (j > 0 && this._vn > 1.2) this.impact(this._vn, x, y, z, nx, ny, nz, k.kind || 'solid');
     return false;

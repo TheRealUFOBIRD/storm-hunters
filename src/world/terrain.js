@@ -56,7 +56,7 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
       vec2 ug=p/3.1,ug2=p.yx/17.; Lay b; { Lay g=lay(0.,ug,dx/3.1,dy/3.1); if(far>.01){ Lay q=lay(0.,ug2,dx.yx/17.,dy.yx/17.); g.c=mix(g.c,q.c,far*.75); g.h=mix(g.h,q.h,far*.75);} b=g;
         if(dry>.02){ Lay d=lay(1.,ug*.93+.3,dx/3.3,dy/3.3); if(far>.01){ Lay q=lay(1.,ug2*.9+.2,dx.yx/19.,dy.yx/19.); d.c=mix(d.c,q.c,far*.75);} over(b,d,clamp(dry+(n0-.45)*.8,0.,1.)); } }
       b.c*=.80+.42*n1+.35*(n2-.45); b.c=mix(b.c,b.c*vec3(1.10,1.02,.72),clamp((n3-.35)*1.5,0.,1.));
-      vec3 soilT=mix(vec3(1.),vec3(1.62,.82,.50),red);
+      vec3 soilT=mix(vec3(1.),vec3(1.38,.9,.66),red);
       float natural=1.;
       // ---- bare soil / sand
       float bare=smoothstep(.50,.80,arid*.92+(n1-.45)*.75+(n0-.45)*.35); bare=max(bare,smoothstep(.62,.72,n1*.6+n0*.4+arid*.1)*.45*(1.-forest));
@@ -66,7 +66,7 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
       if(fm>.003){ Lay f=lay(8.,p/4.1,dx/4.1,dy/4.1); f.c*=.7+.6*n1; f.c=mix(f.c,vec3(.018,.032,.010)*(0.55+1.2*n0+.5*(n1-.4)),smoothstep(500.,2600.,dist)*.85); over(b,f,fm*.92); }
       if(swamp>.05){ Lay f=lay(2.,p/3.,dx/3.,dy/3.); f.c*=vec3(.42,.42,.34); over(b,f,smoothstep(.35,.65,swamp*.8+(n1-.45)*1.1)*.8); }
       // ---- urban lots
-      if(urban>.15){ float um=smoothstep(.45,.7,urban*.55+(n0-.45)*.5+(n1-.45)*.8+.12); Lay f=lay(11.,p/5.,dx/5.,dy/5.); f.c*=.55+.5*n1; over(b,f,um*.8*smoothstep(.3,.8,urban)); }
+      if(urban>.15){ float um=smoothstep(.45,.7,urban*.55+(n0-.45)*.5+(n1-.45)*.8+.12); Lay f=lay(11.,p/5.,dx/5.,dy/5.); f.c*=(.32+.3*n1)*vec3(.95,.93,.9); over(b,f,um*.7*smoothstep(.55,.9,urban)); }
       // ---- farmland
       ivec2 sc=ivec2(floor(p/${SEC}.)); ivec2 si=sc-ivec2(${SX0},${SZ0}); float cropW=0.,gravE=99.,yardE=99.,rowA=0.; g_stripe=0.;
       if(si.x>=0&&si.y>=0&&si.x<${SNX}&&si.y<${SNZ}){
@@ -107,13 +107,13 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
       float shore=smoothstep(.62,.53,bb.a)*step(.4,bb.a); float bch=shore*smoothstep(2.4,1.2,vWp.y+(n0-.45)*1.2)*(1.-rk);
       if(bch>.003){ Lay s=lay(5.,p/4.3,dx/4.3,dy/4.3); s.c*=.95+.2*n1; float wt=smoothstep(.75,.15,vWp.y); s.c*=mix(1.,.5,wt); over(b,s,bch); }
       // ---- river banks
-      float rv=mix(99.,rd.w,fine); if(rv<26.){ Lay s=lay(2.,p/3.3,dx/3.3,dy/3.3); s.c*=mix(vec3(.62,.6,.55),vec3(1.5,1.35,1.15),smoothstep(.35,.6,n1))*soilT; s.c*=mix(1.,.55,smoothstep(8.,0.,rv)); over(b,s,smoothstep(19.,8.,rv+(n0-.45)*16.+(n1-.4)*14.)*.95); }
+      float rv=mix(99.,rd.w,fine); if(rv<26.){ Lay s=lay(2.,p/3.3,dx/3.3,dy/3.3); s.c*=mix(vec3(.62,.6,.55),vec3(1.5,1.35,1.15),smoothstep(.35,.6,n1))*soilT; s.c*=mix(1.,.55,smoothstep(8.,0.,rv)); s.c=mix(s.c,vec3(dot(s.c,vec3(.33))),.4); over(b,s,smoothstep(10.,3.,rv+(n0-.45)*10.+(n1-.4)*8.)*.9); }
       // ---- snow
       float sl=uSnowA.x+uSnowA.y*vWp.z; float sn=smoothstep(0.,70.,vWp.y-sl+(n1-.45)*120.+(n0-.45)*30.-slope*170.); if(sn>.003){ Lay s=lay(7.,p/5.,dx/5.,dy/5.); over(b,s,sn); }
       // ---- gravel roads, yards, shoulders
       float gm=0.,trk=0.; float gE=gravE+(n0-.45)*.8; gE=max(gE,min(0.,0.)); float aaw=max(.35,length(vec2(length(dx),length(dy)))*.6); gm=smoothstep(aaw,-aaw,gE)*smoothstep(1.,6.,min(eMaj,eStr)+3.); trk=(smoothstep(.55,.2,abs(abs(gravE+3.6)-.95)));
-      float ym=smoothstep(1.5,-1.5,yardE); float sm=smoothstep(2.3,1.0,eMaj+(n0-.45)*1.4)*step(eMaj,50.); float gg=max(max(gm,ym*.95),sm);
-      if(gg>.003){ Lay s=lay(4.,p/2.6,dx/2.6,dy/2.6); if(far>.01){ Lay q=lay(4.,p.yx/11.,dx.yx/11.,dy.yx/11.); s.c=mix(s.c,q.c,far*.7);} s.c=mix(s.c,s.c*mix(vec3(1.),vec3(1.2,.85,.62),red*.75),.85); s.c*=.8+.35*n1; s.c*=mix(1.,1.16,trk*gm*smoothstep(200.,40.,dist)); s.c*=1.-.25*smoothstep(-1.2,-.2,gravE)*gm; over(b,s,gg); natural*=1.-gg; }
+      float ym=smoothstep(1.5,-1.5,yardE); float sm=smoothstep(.9,-.1,eMaj+(n0-.45)*1.2)*step(eMaj,50.); float gg=max(max(gm,ym*.95),sm);
+      if(gg>.003){ Lay s=lay(4.,p/1.6,dx/1.6,dy/1.6); if(far>.01){ Lay q=lay(4.,p.yx/11.,dx.yx/11.,dy.yx/11.); s.c=mix(s.c,q.c,far*.7);} s.c*=.75; s.c=mix(s.c,s.c*mix(vec3(1.),vec3(1.2,.85,.62),red*.75),.85); s.c*=.8+.35*n1; s.c*=mix(1.,1.16,trk*gm*smoothstep(200.,40.,dist)); s.c*=1.-.25*smoothstep(-1.2,-.2,gravE)*gm; over(b,s,gg); natural*=1.-gg; }
       // ---- tornado damage swath
       float dm=damageAt(p); if(dm>.02){ float dn=dm+(n0-.45)*.35+(n1-.45)*.3; float sw=smoothstep(.22,.62,dn); Lay s=lay(2.,p/4.7,dx/4.7,dy/4.7); s.c*=soilT*vec3(.72,.68,.62)*(.8+.5*n0); b.c=mix(b.c,mix(b.c,b.c*vec3(.95,.82,.62),.8),smoothstep(.05,.3,dn)); over(b,s,sw*.92); }
       // ---- wetness

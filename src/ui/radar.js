@@ -23,7 +23,7 @@ export class RadarEngine {
     const S = this.ctx.storms, a = (az + 0.5) / AZ * TAU, dx = Math.sin(a), dz = -Math.cos(a), R = this.range, gr = this.gr, gv = this.gv, sx = this.sx, sz = this.sz, seed = (az * 7919) | 0;
     for (let i = 0; i < GATES; i++) {
       const r = (i + 0.5) / GATES * R, x = sx + dx * r, z = sz + dz * r; let d = S.reflectivity ? S.reflectivity(x, z) : 0; const n = (((seed ^ (i * 104729)) * 2654435761) >>> 24) / 255 - 0.5;
-      if (r < 900 && d < 8) d = Math.max(d, 10 + n * 14 - r / 120); // ground clutter near the site
+      if (r < 500 && d < 8) d = Math.max(d, 6 + n * 10 - r / 80); // ground clutter near the site
       d += d > 4 ? n * 3.2 : 0; const q = d < 5 ? 0 : d > 80 ? 160 : (d * 2) | 0; gr[i] = this.lutR[q];
       if (d > 7 && S.velocity) { const v = S.velocity(x, z, sx, sz) + n * 2; gv[i] = this.lutV[v < -64 ? 0 : v > 64 ? 256 : Math.round((v + 64) * 2)]; } else gv[i] = 0;
     }

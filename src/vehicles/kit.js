@@ -78,7 +78,7 @@ export class CarKit {
     if (W.dlo) {
       const f = sdRound(W.dlo.map(side), W.dloR ?? 0.05), c = body.split((x, y, z, a, b) => (b > Hs * 1.02 ? 1 : f(a, b))); body = c.pos; reveal(c.edges, 0.012); let rest = c.neg;
       for (const w of W.side) { const g = sdRound(w.map(side), W.sideR ?? 0.035), r = rest.split((x, y, z, a, b) => g(a, b)); rest = r.pos; gl(r.neg); T.both(rim(r.edges, (e) => [-e[3] * 0.014, -e[4] * 0.014, -e[5] * 0.014], true), ST.rubber); }
-      T.both(rest.offset(-0.004), ST.gloss);
+      T.both(rest.offset(-0.004), ST.gloss); T.both(rest.clone().offset(-0.03).flip(), ST.liner);
       if (W.chrome) { const P = roundedPath(W.dlo.map(side), W.dloR ?? 0.05, true, 5).map((p) => G.at(p[0], p[1], 0.002).slice(0, 3)); T.both(tube(P, 0.0065, 5, P.length * 2, true), W.chrome === true ? ST.satin : W.chrome); }
     }
     this.houseS = body;
@@ -121,7 +121,8 @@ export class CarKit {
     if (this.lod) { T.add(box(w * 2, 0.2, 0.5).at(0, o.y - 0.12, z - 0.2), ST.dash); for (const sx of [-1, 1]) T.add(rbox(0.5, 0.7, 0.2, 0.05).at(o.seatX * sx, o.seatY + 0.3, -o.seatF + 0.25, -0.25, 0, 0), ST.seat); return; }
     // dash: swept section
     const sec = [[0.0, -0.36], [0.02, -0.2], [0.02, -0.05], [-0.04, -0.005], [-0.14, 0.012], [-0.3, -0.005], [-0.55, -0.05], [-0.55, -0.36]]; // [z rel, y rel]
-    const hb = this.C.house.base, lim = (x) => lerp(hb.fc, hb.f0, Math.min(1, (x / hb.x0) ** 2)) - 0.05, n = 22; const g = Surf.grid(n, sec.length, (u, v) => { const x = lerp(-w, w, u / (n - 1)), c = sec[v], bw = Math.abs(x) / w, drv = Math.exp(-(((x + o.seatX) / 0.2) ** 2)); const zz = Math.max(z + c[0] + (v < 5 ? bw * bw * 0.05 : 0) + (v < 3 ? drv * -0.02 : 0), -lim(x)); let yy = o.y + c[1] + (v >= 2 && v <= 4 ? drv * 0.035 : 0); const out = this.G.basePoly.some((p, i, P) => i && (P[i - 1][0] + zz) * (p[0] + zz) <= 0 && Math.abs(x) > Math.min(p[1], P[i - 1][1]) - 0.06 && p[1] > 0.3); yy = Math.min(yy, this.L.top(-zz, x) + (out || zz < -hb.f0 ? -0.02 : 0.05)); return [x, yy, zz, 0, 0]; }, false); T.add(g, ST.dash);
+    const hb = this.C.house.base, lim = (x) => lerp(hb.fc, hb.f0, Math.min(1, (x / hb.x0) ** 2)) - 0.05, n = 22; const g = Surf.grid(n, sec.length, (u, v) => { const x = lerp(-w, w, u / (n - 1)), c = sec[v], bw = Math.abs(x) / w, drv = Math.exp(-(((x + o.seatX) / 0.2) ** 2)); const zz = Math.max(z + c[0] + (v < 5 ? bw * bw * 0.05 : 0) + (v < 3 ? drv * -0.02 : 0), -lim(x)); let yy = o.y + c[1] + (v >= 2 && v <= 4 ? drv * 0.035 : 0); let bx = -1; const P = this.G.basePoly; for (let i = 1; i < P.length; i++) if ((P[i - 1][0] + zz) * (P[i][0] + zz) <= 0) { const k = Math.abs(P[i][0] - P[i - 1][0]) < 1e-9 ? 0 : (-zz - P[i - 1][0]) / (P[i][0] - P[i - 1][0]); bx = Math.max(bx, lerp(P[i - 1][1], P[i][1], k)); }
+      let xx = x; if (bx > 0.1) xx = clamp(x, -(bx - 0.07), bx - 0.07); yy = Math.min(yy, this.L.top(-zz, xx) + (bx < 0.1 ? -0.03 : 0.05)); return [xx, yy, zz, 0, 0]; return [x, yy, zz, 0, 0]; }, false); T.add(g, ST.dash);
     T.add(rbox(w * 1.9, 0.012, 0.012, 0.004).at(0, o.y - 0.115, z + 0.028), ST.satinIn); T.add(rbox(w * 1.2, 0.09, 0.02, 0.01).at(o.seatX * 0.72, o.y - 0.18, z + 0.03), ST.dash2);
     // centre stack + tunnel
     T.add(rbox(0.3, 0.34, 0.1, 0.03, 2).at(0, o.y - 0.26, z + 0.02, -0.25, 0, 0), ST.dash2); this.screen = { x: 0, y: o.y - 0.02, z: z + 0.075, w: 0.27, h: 0.155, rx: -0.22 }; T.add(rbox(0.295, 0.18, 0.018, 0.008).at(0, o.y - 0.02, z + 0.062, -0.22, 0, 0), ST.gloss);
@@ -153,6 +154,9 @@ export class CarKit {
   probe(x, y, f, s = 1) { const T = this.trim; T.add(lathe([[0.0, 0.2], [0.05, 0.19], [0.1, 0.13], [0.16, 0.06], [0.2, 0.0], [0.21, -0.015], [0, -0.015]].map((p) => [p[0] * s, p[1] * s]), 20).at(x, y, -f), { c: 0xc8741a, r: 0.45, m: 0.1 }); T.add(torus(0.175 * s, 0.012 * s, 6, 20).at(x, y + 0.05 * s, -f, Math.PI / 2, 0, 0), ST.powder); T.add(cyl(0.02 * s, 0.015 * s, 0.1 * s, 8).at(x, y + 0.24 * s, -f), ST.alu); }
   // wire guard floating over the greenhouse glass between params (a fraction along side or explicit a), b fractions
   guard(a0, a1, b0, b1, off, na, nb, o = {}) { const G = this.G, T = this.trim, H = G.Hs, P = (a, b) => G.at(a, b * H, off).slice(0, 3), r = o.r ?? 0.012, ad = (s) => (o.center ? T.add(s, ST.powder) : T.both(s, ST.powder)); const ring = [P(a0, b0), P((a0 + a1) / 2, b0), P(a1, b0), P(a1, (b0 + b1) / 2), P(a1, b1), P((a0 + a1) / 2, b1), P(a0, b1), P(a0, (b0 + b1) / 2)]; ad(tube(ring, r, 6, 32, true)); if (this.lod) return; for (let k = 1; k < na; k++) { const a = lerp(a0, a1, k / na); ad(tube([P(a, b0), P(a, (b0 + b1) / 2), P(a, b1)], 0.0032, 4, 4)); } for (let k = 1; k < nb; k++) { const b = lerp(b0, b1, k / nb); ad(tube([P(a0, b), P((a0 + a1) / 2, b), P(a1, b)], 0.0032, 4, 6)); } for (const [a, b] of [[a0, b0], [a1, b0], [a0, b1], [a1, b1]]) { const p = G.at(a, b * H, 0), q = P(a, b); ad(pipe(p.slice(0, 3), q, 0.01, 5)); } }
+  part(name, pos) { const t = new Trim(); (this.parts2 || (this.parts2 = {}))[name] = { trim: t, pos }; return t; }
+  bolts(pts, r = 0.012) { if (this.lod) return; for (const p of pts) this.trim.add(cyl(r, r * 0.8, 0.012, 6).at(p[0], p[1], p[2], p[3] || 0, p[4] || 0, p[5] || 0), ST.gun); }
+  // generic profile: arrays of insets for knots shared t positions
   hailCage(paths, r = 0.011) { for (const p of paths) this.trim.both(tube(p, r, 6, p.length * 4), ST.powder); }
   mesh(x0, x1, y, z0, z1, n, m, r = 0.004) { if (this.lod) return; for (let k = 0; k <= n; k++) { const x = lerp(x0, x1, k / n); this.trim.add(pipe([x, y, z0], [x, y, z1], r, 4), ST.powder); } for (let k = 0; k <= m; k++) { const z = lerp(z0, z1, k / m); this.trim.add(pipe([x0, y, z], [x1, y, z], r, 4), ST.powder); } }
 }

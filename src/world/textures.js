@@ -102,7 +102,19 @@ function makeArray(size, n, aniso) {
   const rt = new THREE.WebGLArrayRenderTarget(size, size, n, { depthBuffer: false, generateMipmaps: true, minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, wrapS: THREE.RepeatWrapping, wrapT: THREE.RepeatWrapping, anisotropy: aniso, type: THREE.UnsignedByteType, format: THREE.RGBAFormat });
   rt.texture.name = 'world-array'; return rt;
 }
-export function createTextures(quality) {
+// IndexedDB cache of the generated texel data (generation costs seconds of shader compiles on some drivers)
+const VER = (() => { let h = 2166136261; const t = COMMON + GROUND + BUILD + MAIN + COPY; for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); })();
+const idb = (fn) => new Promise((res) => { try { const r = indexedDB.open('storm-hunters-world', 1); r.onupgradeneeded = () => r.result.createObjectStore('tex'); r.onerror = () => res(null); r.onsuccess = () => { try { fn(r.result.transaction('tex', 'readwrite').objectStore('tex'), res); } catch { res(null); } }; } catch { res(null); } });
+const dbGet = (k) => idb((st, res) => { const q = st.get(k); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); });
+const dbPut = (k, v) => idb((st, res) => { const q = st.put(v, k); q.onsuccess = () => res(true); q.onerror = () => res(null); });
+function arrTex(data, sz, n, an) { const t = new THREE.DataArrayTexture(data, sz, sz, n); t.format = THREE.RGBAFormat; t.type = THREE.UnsignedByteType; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = true; t.anisotropy = an; t.needsUpdate = true; return { texture: t }; }
+export async function createTextures(quality) {
+  const sz0 = quality.id === 'low' ? 256 : quality.id === 'medium' ? 512 : 1024, bs0 = quality.id === 'low' ? 256 : 512, an0 = quality.id === 'low' ? 2 : 8, key = `${VER}-${sz0}-${bs0}`;
+  const hit = await Promise.race([dbGet(key), new Promise((r) => setTimeout(() => r(null), 1500))]);
+  if (hit && hit.gA) return { gA: arrTex(new Uint8Array(hit.gA), sz0, L.count, an0), gN: arrTex(new Uint8Array(hit.gN), sz0, L.count, an0), bA: arrTex(new Uint8Array(hit.bA), bs0, BL.count, an0), bN: arrTex(new Uint8Array(hit.bN), bs0, BL.count, an0), done: true, cached: true, fill() {} };
+  const T = createTexturesGPU(quality); T.key = key; return T;
+}
+function createTexturesGPU(quality) {
   const size = quality.id === 'low' ? 256 : quality.id === 'medium' ? 512 : 1024, bs = quality.id === 'low' ? 256 : 512, an = quality.id === 'low' ? 2 : 8;
   const T = { gA: makeArray(size, L.count, an), gN: makeArray(size, L.count, an), bA: makeArray(bs, BL.count, an), bN: makeArray(bs, BL.count, an), done: false };
   T.fill = (renderer) => {
@@ -116,17 +128,21 @@ export function createTextures(quality) {
     // kick all compiles off in parallel before first use
     const warm = new THREE.Scene(); for (const m of [...gm, ...bm, cp]) { const q = new THREE.Mesh(quad.geometry, m); q.frustumCulled = false; warm.add(q); }
     const prev = renderer.getRenderTarget(); renderer.compile(warm, cam);
-    const run = (mats, tmp, str, A, Nn, n, sz) => {
+    const cap = { gA: new Uint8Array(size * size * 4 * L.count), gN: new Uint8Array(size * size * 4 * L.count), bA: new Uint8Array(bs * bs * 4 * BL.count), bN: new Uint8Array(bs * bs * 4 * BL.count) }; let ok = true;
+    const capRT = { [size]: new THREE.WebGLRenderTarget(size, size, { depthBuffer: false }), [bs]: new THREE.WebGLRenderTarget(bs, bs, { depthBuffer: false }) };
+    const grab = (arr, i, sz) => { if (!ok) return; try { const rt = capRT[sz]; renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.readRenderTargetPixels(rt, 0, 0, sz, sz, arr.subarray(i * sz * sz * 4, (i + 1) * sz * sz * 4)); } catch (e) { ok = false; } };
+    const run = (mats, tmp, str, A, Nn, n, sz, ca, cn) => {
       cp.uniforms.uSize.value = sz; cp.uniforms.uStr.value = str; A.texture.generateMipmaps = Nn.texture.generateMipmaps = false;
       for (let i = 0; i < n; i++) {
         quad.material = mats[i]; renderer.setRenderTarget(tmp); renderer.render(scene, cam); mats[i].dispose();
         quad.material = cp; cp.uniforms.tA.value = tmp.textures[0]; cp.uniforms.tB.value = tmp.textures[1]; if (i === n - 1) A.texture.generateMipmaps = Nn.texture.generateMipmaps = true;
-        cp.uniforms.uMode.value = 0; renderer.setRenderTarget(A, i); renderer.render(scene, cam); cp.uniforms.uMode.value = 1; renderer.setRenderTarget(Nn, i); renderer.render(scene, cam);
+        cp.uniforms.uMode.value = 0; renderer.setRenderTarget(A, i); renderer.render(scene, cam); grab(ca, i, sz); cp.uniforms.uMode.value = 1; renderer.setRenderTarget(Nn, i); renderer.render(scene, cam); grab(cn, i, sz);
       }
       renderer.setRenderTarget(null); tmp.dispose();
     };
     const pAuto = renderer.autoClear, pTM = renderer.toneMapping; renderer.autoClear = true; renderer.toneMapping = THREE.NoToneMapping;
-    run(gm, tmpA, .0065, T.gA, T.gN, L.count, size); run(bm, tmpB, .0085, T.bA, T.bN, BL.count, bs);
+    run(gm, tmpA, .0065, T.gA, T.gN, L.count, size, cap.gA, cap.gN); run(bm, tmpB, .0085, T.bA, T.bN, BL.count, bs, cap.bA, cap.bN); capRT[size].dispose(); capRT[bs].dispose();
+    if (ok && T.key) dbPut(T.key, { gA: cap.gA.buffer, gN: cap.gN.buffer, bA: cap.bA.buffer, bN: cap.bN.buffer });
     renderer.setRenderTarget(prev); renderer.autoClear = pAuto; renderer.toneMapping = pTM; T.ms = performance.now() - t0; 
   };
   return T;

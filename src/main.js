@@ -24,13 +24,13 @@ const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
 // Slow cinematic drift in front of a staged storm behind the main menu
 function enterMenu() {
   ctx.state = 'menu';
-  const w = ctx.world, s = w.spawnPoint('Wichita') || { x: 0, z: 0 }, bx = s.x + 60, bz = s.z;
+  const w = ctx.world, s = w.spawnPoint?.('Wichita') || { x: 0, z: 0 }, bx = s.x + 60, bz = s.z;
   if (!ctx.storms.mock && ctx.storms.isAuthority) try { ctx.storms.clear?.(); ctx.storms.spawnAt(bx - 300, bz - 1500, { ef: 4, stage: 'mature', type: 'supercell', menu: true }); ctx.menuStorm = true; } catch (e) { console.error(e); }
   w.prewarm?.(bx, bz);
   const cam = (c) => { const t = ctx.time.real * 0.02, x = bx + Math.sin(t) * 20, z = bz + Math.cos(t) * 20, tt = ctx.storms.tornadoes[0]; c.position.set(x, w.heightAt(x, z) + 4.2, z); c.lookAt(tt ? tt.x - 420 : bx, c.position.y + 190, tt ? tt.z : bz - 2000); };
   ctx.player.cameraOverride = cam;
   if (ctx.player.mock) ctx.player.update = () => { if (ctx.state === 'menu') cam(ctx.camera); };
-  ctx.ui.openScreen('main');
+  try { ctx.ui.openScreen('main'); } catch (e) { console.error('[menu]', e?.stack || e); }
 }
 function quitGame() { ctx.net.leave?.(); if (ctx.player.vehicle) ctx.player.exit?.(); ctx.vehicles.clear?.(); enterMenu(); }
 async function startGame(o) {
@@ -39,7 +39,7 @@ async function startGame(o) {
     if (o.mode === 'host') await ctx.net.host?.(o.name, o.room); else if (o.mode === 'join') await ctx.net.join?.(o.room, o.name);
     if (ctx.menuStorm && o.mode !== 'join') ctx.storms.clear?.();
     ctx.menuStorm = null;
-    const sp = ctx.world.spawnPoint(o.city);
+    const sp = ctx.world.spawnPoint?.(o.city) || { x: 0, z: 0, heading: 0 };
     await Promise.race([ctx.world.prewarm?.(sp.x, sp.z), wait(12)]);
     ctx.player.cameraOverride = null; ctx.state = 'playing';
     ctx.player.teleport(sp.x, sp.z, sp.heading);

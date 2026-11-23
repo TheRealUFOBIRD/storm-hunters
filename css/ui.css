@@ -1,0 +1,358 @@
+/* Storm Hunters field computer. 1rem = 16px at 1600x900, scales with the short side. */
+html { font-size: clamp(12.5px, min(1vw, 1.778vh), 40px); }
+.shui {
+  --soot: #14130d; --soot2: #1c1a12; --soot3: #26241a; --line: #4b4733; --line2: #6c654a; --ink: #f2ead6; --dim: #a79f88; --mute: #756f5c;
+  --amber: #ffb000; --amber2: #ffc94d; --good: #4be37a; --bad: #ff4438; --tor: #ff2a22; --svr: #ffc400; --paper: #ebe3cf; --paper2: #d9cfb5; --pink: #3a2f1e;
+  --f: "Bahnschrift", "DIN Alternate", "Roboto Condensed", "Arial Narrow", sans-serif; --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+  --halo: 0 0 .25rem rgba(10,9,5,.95), 0 0 .7rem rgba(10,9,5,.6);
+  font-family: var(--f); font-stretch: 87.5%; color: var(--ink); font-size: 1rem; line-height: 1.25; -webkit-font-smoothing: antialiased; user-select: none;
+  /* skew-T isotherm hatching used as panel texture */
+  --hatch: repeating-linear-gradient(-55deg, rgba(242,234,214,.028) 0 1px, transparent 1px 1.1rem);
+}
+.shui *, .shui *::before, .shui *::after { box-sizing: border-box; }
+.shui [hidden] { display: none !important; }
+.shui button { font: inherit; font-stretch: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+.shui button:disabled { cursor: default; opacity: .38; }
+.shui input { font: inherit; font-stretch: inherit; color: inherit; }
+.shui .ic { width: 1.25em; height: 1.25em; display: inline-block; vertical-align: -.25em; flex: none; }
+.shui kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 1.6em; height: 1.6em; padding: 0 .4em; font: 600 .78rem/1 var(--f); font-stretch: 87.5%; color: var(--soot); background: var(--ink); clip-path: polygon(0 0, 100% 0, 100% 72%, 84% 100%, 0 100%); margin-right: .15em; letter-spacing: .02em; text-transform: uppercase; }
+.shui kbd.pad { border-radius: 1em; clip-path: none; background: var(--amber); }
+.shui kbd.ms { background: none; color: var(--ink); padding: 0; min-width: 1.4em; } .shui kbd.ms svg { width: 1.5em; height: 1.5em; }
+.shui .stc { height: 1em; width: auto; display: block; overflow: visible; }
+.shui .stn { display: inline-flex; gap: .14em; } .shui .stn svg { height: 1em; width: .6em; overflow: visible; } .shui .stn svg.off { opacity: .05; }
+.shui .stars { display: inline-flex; gap: .1em; } .shui .stars svg { width: 1em; height: 1em; fill: none; stroke: var(--mute); stroke-width: 1.6; } .shui .stars svg.on { fill: var(--amber); stroke: var(--amber); }
+.shui h2, .shui h3 { margin: 0; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.shui h3 { font-size: .8rem; color: var(--dim); letter-spacing: .14em; margin: 0 0 .6rem; display: flex; align-items: center; gap: .5rem; }
+.shui h3::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.shui.keynav :focus-visible, .shui.keynav button:focus { outline: 2px solid var(--amber); outline-offset: 2px; }
+.shui :focus:not(:focus-visible) { outline: none; }
+.shui .none { color: var(--dim); font-size: .9rem; padding: .6rem 0; }
+
+/* ================= HUD ================= */
+.shui .hud { position: absolute; inset: 0; pointer-events: none; max-width: 240vh; margin: 0 auto; text-shadow: var(--halo); transition: opacity .25s; }
+.shui .hud.dim > :not(.notes) { opacity: 0; }
+.shui .hud.vfon .tl, .shui .hud.vfon .bl, .shui .hud.vfon .compass, .shui .hud.vfon .tools, .shui .hud.vfon .cash, .shui .hud.vfon .live { opacity: 0; transition: opacity .2s; }
+.shui .hud.swepton > :not(.hurt):not(.flash) { opacity: 0; }
+.shui .compass { position: absolute; top: 1rem; left: 50%; width: 46rem; height: 3.6rem; margin-left: -23rem; }
+.shui .compass canvas, .shui canvas { display: block; width: 100%; height: 100%; }
+.shui .threat { position: absolute; top: 4.8rem; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: auto auto auto auto; grid-template-rows: auto auto; column-gap: .9rem; align-items: baseline; padding: .4rem 1rem .5rem; background: linear-gradient(90deg, transparent, rgba(12,11,7,.72) 12%, rgba(12,11,7,.72) 88%, transparent); white-space: nowrap; --c: var(--amber); }
+.shui .threat .ef { font: 700 1.1rem var(--f); font-stretch: 75%; color: var(--soot); background: var(--c); padding: .05rem .4rem; text-shadow: none; font-style: normal; align-self: center; }
+.shui .threat b { font-size: 1.05rem; text-transform: uppercase; letter-spacing: .06em; color: var(--c); }
+.shui .threat span { font-size: 1rem; } .shui .threat span + span { color: var(--dim); }
+.shui .threat em { grid-column: 1 / -1; font-style: normal; color: var(--bad); font-weight: 700; text-transform: uppercase; letter-spacing: .1em; font-size: .85rem; text-align: center; }
+.shui .threat em:empty { display: none; }
+.shui .tbar { grid-column: 1 / -1; height: 3px; background: rgba(242,234,214,.14); margin-top: .35rem; } .shui .tbar s { display: block; height: 100%; background: var(--c); transition: width .3s; }
+.shui .threat.hot { animation: pulse 0.9s steps(2) infinite; }
+@keyframes pulse { 50% { background: linear-gradient(90deg, transparent, rgba(110,14,8,.78) 12%, rgba(110,14,8,.78) 88%, transparent); } }
+
+.shui .tl { position: absolute; top: 1.4rem; left: 1.6rem; width: 22rem; display: flex; flex-direction: column; gap: .8rem; }
+.shui .mission { background: rgba(12,11,7,.6); border-left: 3px solid var(--good); padding: .6rem .8rem .7rem; backdrop-filter: blur(6px); }
+.shui .mission header { display: flex; align-items: center; gap: .5rem; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.shui .mission header i { font-style: normal; color: var(--soot); background: var(--good); padding: .05rem .35rem; text-shadow: none; font-weight: 700; }
+.shui .mission header span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.shui .mission header u { text-decoration: none; font: 700 .95rem var(--f); color: var(--ink); letter-spacing: .04em; } .shui .mission header u.hot { color: var(--bad); }
+.shui .mission h4 { margin: .25rem 0 .4rem; font-size: 1.2rem; font-weight: 700; letter-spacing: .02em; }
+.shui .mission ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; }
+.shui .mission li { display: flex; gap: .45rem; font-size: .93rem; align-items: flex-start; } .shui .mission li > span { color: var(--good); padding-top: .05rem; } .shui .mission li > div { flex: 1; }
+.shui .mission li.done { color: var(--mute); text-decoration: line-through; } .shui .mission li.next { color: var(--dim); } .shui .mission li.next > span { color: var(--mute); }
+.shui .mission li u { text-decoration: none; color: var(--amber); font-weight: 600; margin-left: .2rem; }
+.shui .mission li i { display: block; height: 3px; margin-top: .3rem; background: rgba(242,234,214,.16); } .shui .mission li i s { display: block; height: 100%; background: var(--good); }
+.shui .mission kbd { font-size: .66rem; height: 1.45em; vertical-align: .05em; }
+.shui .probe { background: rgba(12,11,7,.68); padding: .5rem .7rem; border-left: 3px solid var(--amber); }
+.shui .probe header { font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); }
+.shui .probe canvas { height: 4.4rem; margin: .3rem 0; }
+.shui .probe .pv { display: flex; gap: .8rem; font-size: .9rem; } .shui .probe .pv b { color: var(--amber); } .shui .probe .pv span:first-of-type { color: #7fd4ff; }
+
+.shui .tr { position: absolute; top: 1.4rem; right: 1.6rem; width: 23rem; display: flex; flex-direction: column; align-items: flex-end; gap: .7rem; }
+.shui .cash { position: relative; text-align: right; }
+.shui .cash > b { font: 700 1.7rem var(--f); font-stretch: 75%; letter-spacing: .03em; font-variant-numeric: tabular-nums; }
+.shui .cash .lvl { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink); }
+.shui .cash .lvl i { width: 6rem; height: 3px; background: rgba(242,234,214,.18); } .shui .cash .lvl s { display: block; height: 100%; background: var(--amber); }
+.shui .delta { position: absolute; right: 0; top: 100%; font: 700 1.05rem var(--f); color: var(--good); animation: rise 1.9s forwards; } .shui .delta.neg { color: var(--bad); }
+@keyframes rise { 0% { transform: translateY(.4rem); opacity: 0; } 15% { transform: none; opacity: 1; } 75% { opacity: 1; } 100% { transform: translateY(-1rem); opacity: 0; } }
+.shui .live { display: grid; grid-template-columns: auto auto 1fr; grid-template-rows: auto auto; column-gap: .6rem; align-items: center; background: rgba(12,11,7,.7); padding: .45rem .8rem; border-right: 3px solid var(--bad); min-width: 15rem; --k: 0; }
+.shui .live i { width: .6rem; height: .6rem; border-radius: 50%; background: var(--bad); animation: blink 1s steps(2) infinite; box-shadow: 0 0 .5rem var(--bad); }
+@keyframes blink { 50% { opacity: .25; } }
+.shui .live span { font-weight: 700; letter-spacing: .14em; color: var(--bad); font-size: .85rem; } .shui .live b { justify-self: end; font: 700 1.3rem var(--f); font-stretch: 75%; color: var(--amber); }
+.shui .live em { grid-column: 1 / 3; font-style: normal; font-weight: 700; font-size: 1.15rem; font-variant-numeric: tabular-nums; } .shui .live u { text-decoration: none; justify-self: end; color: var(--dim); font-size: .85rem; }
+.shui .eas { display: flex; width: 23rem; background: var(--soot); text-shadow: none; border-top: .35rem solid var(--tor); animation: easin .35s cubic-bezier(.2,.8,.2,1); }
+.shui .eas.svr { border-color: var(--svr); }
+@keyframes easin { from { transform: translateX(110%); } }
+.shui .eas canvas { width: 7.5rem; height: 7.5rem; flex: none; }
+.shui .eas > div { padding: .6rem .8rem; } .shui .eas b { display: block; text-transform: uppercase; letter-spacing: .08em; font-size: 1.05rem; color: var(--tor); } .shui .eas.svr b { color: var(--svr); }
+.shui .eas p { margin: .3rem 0 0; font-size: .85rem; line-height: 1.3; color: var(--ink); }
+.shui .notes { display: flex; flex-direction: column; gap: .4rem; align-items: flex-end; }
+.shui .note { background: rgba(12,11,7,.8); padding: .45rem .8rem .5rem; border-right: 3px solid var(--dim); max-width: 23rem; animation: notein .3s cubic-bezier(.2,.8,.2,1); transition: opacity .3s, transform .3s; text-align: right; }
+.shui .note.good { border-color: var(--good); } .shui .note.warn { border-color: var(--amber); } .shui .note.bad { border-color: var(--bad); }
+.shui .note.out { opacity: 0; transform: translateX(1rem); }
+.shui .note b { font-size: .95rem; font-weight: 700; } .shui .note p { margin: .15rem 0 0; color: var(--dim); font-size: .85rem; }
+@keyframes notein { from { opacity: 0; transform: translateX(1.5rem); } }
+
+.shui .bl { position: absolute; left: 1.6rem; bottom: 1.4rem; display: flex; flex-direction: column; gap: .6rem; }
+.shui .blrow { display: flex; align-items: flex-end; gap: .8rem; }
+.shui .mini { position: relative; width: 17rem; height: 14rem; background: #16150e; clip-path: polygon(0 0, 100% 0, 100% calc(100% - 1.4rem), calc(100% - 1.4rem) 100%, 0 100%); }
+.shui .mini::after { content: ""; position: absolute; inset: 0; border: 1px solid var(--line); pointer-events: none; }
+.shui .mini .mk { position: absolute; left: 0; right: 0; bottom: 0; padding: .3rem .5rem; font-size: .72rem; letter-spacing: .06em; background: linear-gradient(transparent, rgba(12,11,7,.85)); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shui .gps { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: .4rem; padding: .3rem .6rem .3rem .3rem; background: var(--amber); color: var(--soot); text-shadow: none; max-width: 100%; }
+.shui .gps svg { width: 1.4rem; height: 1.4rem; transition: transform .3s; } .shui .gps b { font-weight: 700; font-size: 1rem; } .shui .gps span { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shui .station { width: 10rem; display: flex; flex-direction: column; background: rgba(12,11,7,.55); padding: .3rem .6rem .5rem; }
+.shui .station canvas { height: 6.4rem; }
+.shui .station dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: .05rem .6rem; font-size: .8rem; }
+.shui .station dt { color: var(--dim); text-transform: uppercase; font-size: .68rem; letter-spacing: .1em; align-self: center; } .shui .station dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.shui .chat { width: 28rem; font-size: .9rem; pointer-events: none; }
+.shui .chat .log { display: flex; flex-direction: column; gap: .15rem; } .shui .chat .cl { transition: opacity 1s; } .shui .chat .cl.old { opacity: 0; } .shui .chat.open .cl.old { opacity: .8; }
+.shui .chat .cl i { color: var(--dim); }
+.shui .chat form { pointer-events: auto; display: flex; align-items: center; gap: .4rem; margin-top: .3rem; background: rgba(12,11,7,.85); border-bottom: 2px solid var(--amber); padding: .2rem .4rem; }
+.shui .chat input { flex: 1; background: none; border: 0; outline: none; font-size: .95rem; }
+
+.shui .bc { position: absolute; left: 50%; bottom: 1.4rem; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: .7rem; width: 44rem; }
+.shui .subs { max-width: 42rem; text-align: center; font-size: 1.15rem; line-height: 1.35; background: rgba(12,11,7,.66); padding: .45rem 1rem .5rem; }
+.shui .subs.in { animation: fade .3s; } @keyframes fade { from { opacity: 0; } }
+.shui .subs b { color: var(--amber); text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; margin-right: .6rem; vertical-align: .1em; }
+.shui .hint { display: flex; align-items: center; gap: .3rem; font-size: .95rem; background: rgba(12,11,7,.6); padding: .35rem .8rem; border: 1px solid var(--line); animation: fade .4s; } .shui .hint span { margin-left: .4rem; }
+.shui .prompt { position: relative; display: flex; align-items: center; gap: .5rem; font-size: 1.05rem; padding: .3rem .8rem .35rem .4rem; background: rgba(12,11,7,.72); }
+.shui .prompt kbd { font-size: .95rem; height: 1.6em; min-width: 1.75em; } .shui .prompt b { font-weight: 600; }
+.shui .prompt > i { display: none; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(242,234,214,.15); } .shui .prompt.hold > i { display: block; } .shui .prompt > i s { display: block; height: 100%; background: var(--amber); }
+.shui .tools { display: flex; gap: 2px; opacity: .55; transition: opacity .3s; } .shui .tools.open { opacity: 1; }
+.shui .tool { position: relative; display: flex; align-items: center; gap: .35rem; height: 2.4rem; padding: 0 .65rem 0 .3rem; background: rgba(12,11,7,.6); color: var(--dim); text-shadow: none; font-size: .82rem; letter-spacing: .04em; text-transform: uppercase; }
+.shui .tool kbd { background: var(--line); color: var(--ink); font-size: .7rem; }
+.shui .tool span { display: none; } .shui .tool.on span, .shui .tools.open .tool span { display: inline; }
+.shui .tools.open .tool:not(.on) span { display: none; }
+.shui .tool em { font-style: normal; font-weight: 700; color: var(--amber); font-size: .8rem; } .shui .tool em:empty { display: none; }
+.shui .tool.on { background: var(--amber); color: var(--soot); } .shui .tool.on kbd { background: var(--soot); color: var(--amber); } .shui .tool.on em { color: var(--soot); }
+.shui .tool.off { opacity: .45; }
+.shui .tool .ic { width: 1.35rem; height: 1.35rem; }
+
+.shui .br { position: absolute; right: 1.6rem; bottom: 1.2rem; }
+.shui .cluster { position: relative; width: 17rem; height: 15rem; }
+.shui .cluster canvas { position: absolute; inset: 0; }
+.shui .spd { position: absolute; left: 0; right: 0; top: 5.1rem; display: flex; justify-content: center; font-size: 3.1rem; color: var(--ink); filter: drop-shadow(0 0 .3rem rgba(10,9,5,.9)); }
+.shui .unit { position: absolute; left: 0; right: 52%; top: 8.55rem; text-align: right; font-size: .78rem; letter-spacing: .2em; text-transform: uppercase; color: var(--dim); }
+.shui .gear { position: absolute; left: 53%; top: 8.3rem; font: 700 1.05rem var(--f); color: var(--amber); letter-spacing: .05em; }
+.shui .bars { position: absolute; left: 4.2rem; right: 4.2rem; bottom: 1.1rem; display: flex; flex-direction: column; gap: .1rem; }
+.shui .gb { display: flex; align-items: center; gap: .45rem; } .shui .gb label { color: var(--dim); display: flex; } .shui .gb label .ic { width: 1rem; height: 1rem; }
+.shui .gb i { flex: 1; height: .35rem; background: rgba(242,234,214,.14); } .shui .gb s { display: block; height: 100%; background: var(--ink); transition: width .3s; }
+.shui .gb.low s { background: var(--bad); } .shui .gb.low label { color: var(--bad); }
+.shui .flags { position: absolute; left: 0; right: 0; bottom: -.6rem; display: flex; justify-content: center; gap: .3rem; font-size: .66rem; letter-spacing: .1em; text-transform: uppercase; }
+.shui .flags b { padding: .05rem .35rem; background: var(--ink); color: var(--soot); text-shadow: none; } .shui .flags b.g { background: var(--good); } .shui .flags b.r { background: var(--bad); color: var(--ink); }
+.shui .foot { position: absolute; right: 1.6rem; bottom: 1.6rem; width: 13rem; }
+.shui .cross { position: absolute; left: 50%; top: 50%; width: 1.6rem; height: 1.6rem; margin: -.8rem; color: rgba(242,234,214,.75); filter: drop-shadow(0 0 2px #000); }
+.shui .world { position: absolute; inset: 0; overflow: hidden; }
+.shui .wm { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; transform-origin: 0 0; --c: var(--amber); white-space: nowrap; margin-left: -6rem; width: 12rem; margin-top: -2.4rem; }
+.shui .wm i { order: 2; width: .9rem; height: .9rem; background: var(--c); transform: rotate(45deg); box-shadow: 0 0 0 2px rgba(10,9,5,.9); margin: .25rem 0; }
+.shui .wm.mis i { transform: none; } .shui .wm.peer i, .shui .wm.prb i { width: .55rem; height: .55rem; border-radius: 50%; transform: none; }
+.shui .wm b { order: 1; font-size: .82rem; font-weight: 600; color: var(--c); letter-spacing: .03em; } .shui .wm span { order: 3; font-size: .8rem; }
+.shui .wm.peer b { font-size: .9rem; }
+.shui .flash { position: absolute; inset: 0; background: #fff; opacity: 0; } .shui .flash.on { animation: flash .35s; } @keyframes flash { 0% { opacity: .55; } 100% { opacity: 0; } }
+.shui .hurt { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 50%, rgba(140,10,0,.55) 100%); }
+.shui .fps { position: absolute; left: 50%; bottom: .2rem; transform: translateX(-50%); font: .7rem var(--mono); color: var(--dim); }
+.shui .scanui { position: absolute; left: 1.6rem; top: 13rem; width: 20rem; background: rgba(11,12,8,.9); border-left: 3px solid var(--amber); padding: .5rem; text-shadow: none; }
+.shui .scanui canvas { height: 13.3rem; } .shui .scanui div { margin-top: .4rem; font-size: .85rem; } .shui .scanui b.g { color: var(--good); } .shui .scanui b.w { color: var(--amber); }
+
+/* viewfinder */
+.shui .vf { position: absolute; inset: 0; } .shui .vf canvas { position: absolute; inset: 0; }
+.shui .vf .vtop { position: absolute; top: 3.4rem; left: 0; right: 0; display: flex; justify-content: center; gap: 1.4rem; font-size: 1rem; letter-spacing: .06em; }
+.shui .vf .vtop b { color: var(--amber); font-size: 1.15rem; } .shui .vf .vtop .bad { color: var(--bad); font-weight: 700; }
+.shui .vf .vbot { position: absolute; bottom: 4.2rem; left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: .35rem; font-size: .9rem; } .shui .vf .vbot span { margin-right: 1rem; }
+.shui .vf .vsub { position: absolute; top: 5.6rem; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: .6rem; font-size: .95rem; white-space: nowrap; }
+.shui .vf .vsub b { color: var(--amber); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; } .shui .vf .vsub .no { color: var(--dim); }
+.shui .vf .vsub em { font-style: normal; font-size: .7rem; letter-spacing: .12em; padding: .05rem .35rem; border: 1px solid var(--line2); }
+.shui .vf.bin .vtop { top: 23%; } .shui .vf.bin .vtop b { font-size: 1.8rem; } .shui .vf.bin .vbot { bottom: 22%; gap: 1.2rem; flex-wrap: wrap; padding: 0 30%; } .shui .vf.bin .vbot span { margin: 0; } .shui .vf.bin .vbot b { color: var(--amber); }
+
+/* ================= result cards ================= */
+.shui .cards { position: absolute; inset: 0; pointer-events: none; }
+.shui .cards > div { position: absolute; animation: cardin .45s cubic-bezier(.2,.8,.2,1); transition: opacity .35s, transform .35s; }
+.shui .cards > div.out { opacity: 0; transform: translateY(1rem); }
+@keyframes cardin { from { opacity: 0; transform: translateY(1.2rem) rotate(-1deg); } }
+.shui .pcard { left: 1.6rem; top: 13rem; display: flex; gap: 0; background: var(--soot); width: 40rem; box-shadow: 0 1rem 3rem rgba(0,0,0,.5); }
+.shui .print { background: var(--paper); padding: .55rem .55rem 0; color: var(--soot); text-shadow: none; flex: none; }
+.shui .pcard .print { width: 22rem; transform: rotate(-1.2deg) translate(.4rem, -.4rem); box-shadow: 0 .4rem 1.2rem rgba(0,0,0,.5); }
+.shui .print .im { aspect-ratio: 16 / 9; background: #2a2a24 center / cover; display: flex; align-items: center; justify-content: center; color: var(--mute); }
+.shui .print footer { display: flex; align-items: baseline; gap: .5rem; padding: .45rem .1rem .55rem; } .shui .print footer b { font-size: .95rem; flex: 1; } .shui .print footer span { font-size: .78rem; color: #6b6450; } .shui .print footer em { font-style: normal; font-weight: 700; }
+.shui .pscore { flex: 1; padding: .7rem .9rem .8rem; }
+.shui .pscore .hd { display: flex; align-items: center; gap: .7rem; } .shui .pscore .num { font-size: 2.3rem; color: var(--amber); } .shui .pscore .num .stc { stroke-width: 10; }
+.shui .pscore .hd em { margin-left: auto; font-style: normal; font-weight: 700; font-size: 1.15rem; color: var(--good); }
+.shui .pscore ul { list-style: none; padding: 0; margin: .6rem 0 .5rem; display: flex; flex-direction: column; gap: .2rem; }
+.shui .pscore li { display: grid; grid-template-columns: 8rem 1fr 2.4rem; align-items: center; gap: .5rem; font-size: .8rem; }
+.shui .pscore li span { color: var(--dim); } .shui .pscore li b { text-align: right; font-variant-numeric: tabular-nums; }
+.shui .pscore li i { height: .3rem; background: rgba(242,234,214,.12); } .shui .pscore li s { display: block; height: 100%; width: var(--w); background: var(--amber); animation: grow .7s var(--d) both cubic-bezier(.2,.8,.2,1); }
+@keyframes grow { from { width: 0; } }
+.shui .tags { display: flex; flex-wrap: wrap; gap: .25rem; } .shui .tags i { font-style: normal; font-size: .66rem; letter-spacing: .12em; padding: .1rem .35rem; background: var(--ink); color: var(--soot); text-shadow: none; } .shui .tags i.rp { background: none; color: var(--dim); border: 1px solid var(--line2); }
+.shui .lcard, .shui .dcard { left: 50%; top: 22%; transform: translateX(-50%); text-align: center; background: rgba(12,11,7,.82); padding: 1rem 2.4rem 1.1rem; border-top: 3px solid var(--amber); }
+.shui .cards > .lcard.out, .shui .cards > .dcard.out { transform: translate(-50%, 1rem); }
+.shui .lcard span, .shui .dcard span { font-size: .78rem; letter-spacing: .24em; text-transform: uppercase; color: var(--dim); }
+.shui .lcard .num { font-size: 4.2rem; color: var(--amber); display: flex; justify-content: center; margin: .5rem 0; } .shui .lcard b { font-size: 1.3rem; text-transform: uppercase; letter-spacing: .1em; }
+.shui .dcard b { display: block; font-size: 1.6rem; margin: .3rem 0 .5rem; } .shui .dcard div { display: flex; gap: 1rem; justify-content: center; } .shui .dcard em { font-style: normal; color: var(--good); font-weight: 700; font-size: 1.15rem; } .shui .dcard i { font-style: normal; color: var(--dim); }
+.shui .dcard.bad { border-color: var(--bad); }
+.shui .skewt { left: 1.6rem; top: 50%; transform: translateY(-50%); width: 34rem; background: var(--paper); color: var(--soot); text-shadow: none; padding: .6rem .8rem .8rem; box-shadow: 0 1rem 3rem rgba(0,0,0,.5); }
+.shui .skewt header { display: flex; justify-content: space-between; text-transform: uppercase; letter-spacing: .1em; font-size: .8rem; border-bottom: 1px solid #a99f82; padding-bottom: .3rem; margin-bottom: .4rem; }
+.shui .skewt .two { display: grid; grid-template-columns: 1fr 12rem; gap: .6rem; } .shui .skewt .sk { height: 20rem; background: #f4eedf; } .shui .skewt .ho { height: 10rem; background: #f4eedf; }
+.shui .skewt dl { display: grid; grid-template-columns: auto 1fr; gap: .2rem .5rem; margin: .5rem 0 0; font-size: .82rem; } .shui .skewt dt { color: #6b6450; } .shui .skewt dd { margin: 0; text-align: right; font-weight: 600; } .shui .skewt dd.hot { color: #c02418; }
+
+/* ================= screens ================= */
+.shui .screens { position: absolute; inset: 0; pointer-events: none; }
+.shui .scr { position: absolute; inset: 0; pointer-events: auto; display: flex; flex-direction: column; background: rgba(15,14,9,.93); background-image: var(--hatch); }
+.shui .scr.in { animation: scrin .28s cubic-bezier(.2,.8,.2,1); } @keyframes scrin { from { opacity: 0; } }
+.shui .bar { flex: none; display: flex; align-items: center; gap: 1.2rem; padding: 1.1rem 2rem; border-bottom: 1px solid var(--line); min-height: 4.4rem; }
+.shui .bar h2 { font-size: 1.5rem; letter-spacing: .1em; white-space: nowrap; }
+.shui .bar .grow { flex: 1; } .shui .bar .cnt { color: var(--dim); font-size: .9rem; }
+.shui .bar .back, .shui .bar .x { display: flex; align-items: center; gap: .4rem; color: var(--dim); padding: .3rem; } .shui .bar .back:hover, .shui .bar .x:hover { color: var(--amber); } .shui .bar .back .ic { width: 1.6rem; height: 1.6rem; } .shui .bar .x .ic { width: 1.3rem; height: 1.3rem; }
+.shui .bar.over { position: absolute; left: 0; right: 0; top: 0; background: linear-gradient(rgba(12,11,7,.92), rgba(12,11,7,.7)); }
+.shui .seg { display: flex; gap: 2px; } .shui .seg button { padding: .45rem .8rem; font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; background: var(--soot3); color: var(--dim); white-space: nowrap; }
+.shui .seg button:hover:not(:disabled) { color: var(--ink); } .shui .seg button.on { background: var(--amber); color: var(--soot); font-weight: 700; }
+.shui .seg.multi button.on { background: var(--soot3); color: var(--ink); box-shadow: inset 0 -2px 0 var(--amber); font-weight: 600; }
+.shui button.txt { color: var(--dim); font-size: .85rem; text-transform: uppercase; letter-spacing: .1em; padding: .4rem .2rem; border-bottom: 1px solid var(--line2); white-space: nowrap; } .shui button.txt:hover { color: var(--amber); border-color: var(--amber); } .shui button.txt.danger { color: #ff8a7a; }
+/* the warning-polygon button */
+.shui .go { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 14rem; height: 3.4rem; padding: 0 2rem; color: var(--soot); font-weight: 700; font-size: 1.05rem; text-transform: uppercase; letter-spacing: .12em; isolation: isolate; text-align: center; }
+.shui .go .wp { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; fill: var(--amber); stroke: none; transition: fill .15s; }
+.shui .go:hover .wp, .shui .go:focus .wp { fill: var(--amber2); } .shui .go.small { min-width: 0; height: 2.6rem; font-size: .9rem; padding: 0 1.3rem; } .shui .go.busy { pointer-events: none; } .shui .go.busy span::after { content: ""; display: inline-block; width: 1.2em; text-align: left; animation: dots 1s steps(4) infinite; } @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+.shui .go:disabled .wp { fill: var(--line2); }
+
+/* main menu */
+.shui .scr.main { background: linear-gradient(90deg, rgba(12,11,7,.9) 0%, rgba(12,11,7,.72) 32%, rgba(12,11,7,0) 58%), linear-gradient(0deg, rgba(12,11,7,.7), transparent 40%); flex-direction: row; justify-content: space-between; padding: 4.6rem 4rem 3.2rem 5rem; }
+.shui .mcol { display: flex; flex-direction: column; width: 30rem; }
+.shui .wordmark { color: var(--ink); filter: drop-shadow(0 .2rem .8rem rgba(0,0,0,.6)); }
+.shui .wordmark .a { height: 5.1rem; } .shui .wordmark .b { height: 3.4rem; margin-top: .75rem; color: var(--amber); }
+.shui .lede { margin: 1.1rem 0 2.6rem; color: var(--dim); font-size: 1.05rem; letter-spacing: .04em; }
+.shui .mnav { display: flex; flex-direction: column; gap: .15rem; }
+.shui .mi { position: relative; height: 3.05rem; display: flex; align-items: center; padding: 0 1.2rem; font-size: 1.3rem; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; isolation: isolate; color: var(--ink); width: 23rem; transition: color .12s, padding .18s; }
+.shui .mi .wp { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; fill: var(--amber); opacity: 0; transform: scaleX(.3); transform-origin: left; transition: opacity .15s, transform .22s cubic-bezier(.2,.8,.2,1); }
+.shui .mi:hover, .shui .mi:focus { color: var(--soot); padding-left: 1.6rem; } .shui .mi:hover .wp, .shui .mi:focus .wp { opacity: 1; transform: none; }
+.shui .mi.lead { color: var(--amber); } .shui .mi.lead:hover, .shui .mi.lead:focus { color: var(--soot); }
+.shui .mnav.small .mi { font-size: 1.1rem; height: 2.7rem; }
+.shui .name { margin-top: auto; display: flex; flex-direction: column; gap: .35rem; width: 18rem; }
+.shui label > span { font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); }
+.shui label input, .shui input.inp { background: rgba(12,11,7,.6); border: 0; border-bottom: 2px solid var(--line2); padding: .5rem .2rem; font-size: 1.1rem; outline: none; } .shui label input:focus, .shui input.inp:focus { border-color: var(--amber); }
+.shui .mside { display: flex; flex-direction: column; align-items: flex-end; justify-content: flex-end; gap: 1rem; }
+.shui .day1 { width: 26rem; background: rgba(12,11,7,.72); padding: .7rem .8rem .8rem; } .shui .day1 canvas { height: 15rem; }
+.shui .day1 ul { list-style: none; display: flex; gap: .8rem; padding: 0; margin: .5rem 0 0; font-size: .78rem; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; } .shui .day1 li i { display: inline-block; width: .7rem; height: .7rem; margin-right: .3rem; vertical-align: -.05rem; }
+.shui .prof { display: flex; gap: .9rem; align-items: baseline; font-size: .85rem; color: var(--dim); text-shadow: var(--halo); } .shui .prof b { color: var(--amber); text-transform: uppercase; letter-spacing: .1em; }
+
+/* start picker */
+.shui .sbody { flex: 1; display: flex; min-height: 0; } .shui .smap { flex: 1; min-width: 0; padding: 1.2rem; } .shui .smap canvas { width: 100%; height: 100%; }
+.shui .start aside { width: 25rem; display: flex; flex-direction: column; padding: 1.4rem 2rem 2rem; border-left: 1px solid var(--line); background: rgba(12,11,7,.5); min-height: 0; }
+.shui .pick b { display: block; font-size: 2rem; line-height: 1.1; } .shui .pick span { color: var(--dim); } .shui .pick em { display: inline-block; margin-left: .6rem; font-style: normal; color: var(--soot); padding: .05rem .4rem; font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 700; }
+.shui .why { color: var(--dim); margin: .5rem 0 1rem; min-height: 1.3em; }
+.shui .cityl { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 1px; margin: 0 -.4rem 1.2rem; padding: 0 .4rem; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.shui .cityl button { display: flex; align-items: center; gap: .6rem; padding: .4rem .5rem; font-size: .95rem; } .shui .cityl button i { width: .55rem; height: .55rem; flex: none; } .shui .cityl button span { margin-left: auto; color: var(--mute); font-size: .78rem; } .shui .cityl button:hover { background: var(--soot3); } .shui .cityl button.on { background: var(--soot3); box-shadow: inset 3px 0 0 var(--amber); color: var(--amber); }
+.shui .start .go { width: 100%; }
+
+/* join + lobby */
+.shui .jbox, .shui .lbody { margin: auto; width: 30rem; display: flex; flex-direction: column; gap: 1.6rem; padding-bottom: 4rem; }
+.shui .jbox label { display: flex; flex-direction: column; gap: .35rem; } .shui .jbox label:first-child input { font-size: 2.6rem; letter-spacing: .35em; font-weight: 700; text-transform: uppercase; }
+.shui .err { color: var(--bad); margin: 0; }
+.shui .code > span { font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--dim); } .shui .code > div { display: flex; gap: .4rem; margin: .5rem 0 .8rem; }
+.shui .code > div b { width: 4.4rem; height: 5.4rem; display: flex; align-items: center; justify-content: center; font-size: 3.4rem; font-weight: 700; background: var(--soot3); border-bottom: 3px solid var(--amber); }
+.shui .code button { display: flex; align-items: center; gap: .5rem; color: var(--amber); font-size: .95rem; max-width: 100%; overflow: hidden; } .shui .code button span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shui .crew ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .35rem; }
+.shui .crew li { display: flex; align-items: center; gap: .6rem; padding: .45rem .6rem; background: rgba(242,234,214,.04); } .shui .crew li i { width: .8rem; height: .8rem; border-radius: 50%; } .shui .crew li span { color: var(--dim); font-size: .8rem; } .shui .crew li em { font-style: normal; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; background: var(--amber); color: var(--soot); padding: 0 .35rem; } .shui .crew li u { margin-left: auto; text-decoration: none; color: var(--dim); font-size: .8rem; }
+.shui .wait { color: var(--dim); margin: 0; }
+
+/* pause */
+.shui .scr.pause { flex-direction: row; justify-content: space-between; padding: 5rem 5rem 4rem; background: linear-gradient(90deg, rgba(12,11,7,.94), rgba(12,11,7,.78) 45%, rgba(12,11,7,.6)); }
+.shui .pcol h2 { font-size: 2.8rem; letter-spacing: .14em; margin-bottom: 2rem; }
+.shui .pside { width: 24rem; display: flex; flex-direction: column; gap: 2rem; } .shui .brief dl { display: grid; grid-template-columns: 1fr auto; gap: .45rem 1rem; margin: 0; } .shui .brief dt { color: var(--dim); } .shui .brief dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.shui .crew h3 kbd { font-size: .8rem; letter-spacing: .2em; }
+
+/* settings */
+.shui .setb { flex: 1; overflow: auto; padding: 1.4rem 2rem 3rem; display: grid; grid-template-columns: repeat(auto-fit, minmax(30rem, 1fr)); gap: 1.4rem 3rem; align-content: start; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.shui fieldset { border: 0; margin: 0; padding: 0; min-width: 0; } .shui legend { font-size: .8rem; letter-spacing: .16em; text-transform: uppercase; color: var(--amber); padding: 0 0 .5rem; width: 100%; border-bottom: 1px solid var(--line); margin-bottom: .3rem; }
+.shui .row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-height: 2.9rem; border-bottom: 1px solid rgba(75,71,51,.4); } .shui .row > span { font-size: 1rem; }
+.shui .tog { display: flex; align-items: center; gap: .6rem; color: var(--dim); font-size: .85rem; text-transform: uppercase; letter-spacing: .08em; width: 5.2rem; }
+.shui .tog i { width: 2.6rem; height: 1.15rem; background: var(--soot3); position: relative; box-shadow: inset 0 0 0 1px var(--line2); } .shui .tog i::after { content: ""; position: absolute; left: .2rem; top: .2rem; width: .75rem; height: .75rem; background: var(--dim); transition: transform .15s; }
+.shui .tog.on { color: var(--ink); } .shui .tog.on i { background: rgba(255,176,0,.25); box-shadow: inset 0 0 0 1px var(--amber); } .shui .tog.on i::after { transform: translateX(1.45rem); background: var(--amber); }
+.shui .rng { display: flex; align-items: center; gap: .8rem; } .shui .rng output { width: 3.4rem; text-align: right; font-variant-numeric: tabular-nums; color: var(--amber); }
+.shui input[type=range] { -webkit-appearance: none; appearance: none; width: 13rem; height: 1.4rem; background: transparent; --p: 50%; }
+.shui input[type=range]::-moz-range-track { height: 3px; background: linear-gradient(90deg, var(--amber) var(--p), var(--line2) var(--p)); } .shui input[type=range]::-webkit-slider-runnable-track { height: 3px; background: linear-gradient(90deg, var(--amber) var(--p), var(--line2) var(--p)); }
+.shui input[type=range]::-moz-range-thumb { width: .55rem; height: 1.2rem; border: 0; border-radius: 0; background: var(--ink); } .shui input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: .55rem; height: 1.2rem; margin-top: -.55rem; background: var(--ink); }
+
+/* how to */
+.shui .hbody { flex: 1; overflow: auto; padding: 1.6rem 2rem 2rem; display: flex; flex-direction: column; gap: 2rem; }
+.shui .loop { list-style: none; counter-reset: s; display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.2rem; padding: 0; margin: 0; }
+.shui .loop li { counter-increment: s; border-top: 3px solid var(--amber); padding-top: .7rem; } .shui .loop li::before { content: "0" counter(s); font-weight: 700; color: var(--amber); font-size: .9rem; letter-spacing: .1em; } .shui .loop b { display: block; font-size: 1.3rem; text-transform: uppercase; letter-spacing: .08em; margin: .2rem 0 .4rem; } .shui .loop p { margin: 0; color: var(--dim); line-height: 1.4; }
+.shui .keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.4rem 2rem; } .shui .keys ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .4rem; } .shui .keys li { display: flex; align-items: center; gap: .1rem; } .shui .keys li span { margin-left: .5rem; }
+
+/* swept */
+.shui .scr.swept { background: radial-gradient(ellipse at center, rgba(40,8,4,.5), rgba(10,6,3,.95)); align-items: center; justify-content: center; }
+.shui .sw { text-align: center; } .shui .sw h1 { margin: 0 0 1.8rem; font-size: 5rem; letter-spacing: .2em; text-transform: uppercase; color: var(--bad); font-weight: 700; font-stretch: 75%; animation: shake .5s 4; }
+@keyframes shake { 25% { transform: translate(.3rem, -.2rem) rotate(.6deg); } 75% { transform: translate(-.3rem, .2rem) rotate(-.6deg); } }
+.shui .sw dl { display: flex; justify-content: center; gap: 2.6rem; margin: 0 0 2.4rem; opacity: 0; transition: opacity .6s; } .shui .swept.settled dl { opacity: 1; } .shui .sw dt { color: var(--dim); font-size: .75rem; letter-spacing: .14em; text-transform: uppercase; } .shui .sw dd { margin: .3rem 0 0; font-size: 1.6rem; font-weight: 700; }
+
+/* radar */
+.shui .scr.radar > .full { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.shui .rbody { flex: 1; display: flex; min-height: 0; }
+.shui .radar aside.storms { width: 22rem; flex: none; padding: 1.1rem 1.2rem; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.shui .cells { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; margin-bottom: 1.2rem; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.shui .cell { display: grid; grid-template-columns: 1fr auto; gap: .1rem .6rem; padding: .5rem .6rem .55rem; background: rgba(242,234,214,.035); border-left: 3px solid var(--line2); font-size: .85rem; }
+.shui .cell b { font-size: 1rem; } .shui .cell .ty { color: var(--dim); text-align: right; } .shui .cell .ds { color: var(--ink); } .shui .cell .mv { color: var(--dim); text-align: right; }
+.shui .cell .rot { grid-column: 1 / -1; height: 3px; background: rgba(242,234,214,.1); margin-top: .2rem; } .shui .cell .rot s { display: block; height: 100%; background: linear-gradient(90deg, #57e08a, #ff4438); }
+.shui .cell em { grid-column: 1 / -1; justify-self: start; font-style: normal; font-weight: 700; font-size: .72rem; letter-spacing: .1em; color: var(--soot); padding: 0 .35rem; margin-top: .2rem; } .shui .cell em.w { background: var(--tor); color: var(--ink); } .shui .cell em.h { background: #7fd4ff; }
+.shui .cell.tor { border-color: var(--tor); } .shui .cell.warn { border-color: var(--svr); } .shui .cell.on { background: rgba(255,176,0,.1); box-shadow: inset 0 0 0 1px var(--amber); }
+.shui .cell .act { grid-column: 1 / -1; display: flex; gap: 1rem; margin-top: .35rem; } .shui .cell .act span { color: var(--amber); text-transform: uppercase; font-size: .75rem; letter-spacing: .1em; border-bottom: 1px solid; }
+.shui .reports { display: grid; grid-template-columns: 1fr 1fr; gap: 2px; } .shui .rep { display: flex; align-items: center; gap: .45rem; padding: .5rem .5rem; background: var(--soot3); font-size: .85rem; } .shui .rep:hover { background: var(--amber); color: var(--soot); } .shui .rep .ic { width: 1.1rem; height: 1.1rem; }
+.shui .scope { flex: 1; position: relative; min-width: 0; } .shui .scope .scv { position: absolute; inset: 0; cursor: crosshair; }
+.shui .vcp { position: absolute; left: 1rem; top: .8rem; display: flex; flex-direction: column; font: .8rem var(--mono); text-shadow: var(--halo); pointer-events: none; } .shui .vcp b { color: var(--amber); font-weight: 600; } .shui .vcp span { color: var(--dim); }
+.shui .cursor { position: absolute; left: 0; top: 0; font: .78rem var(--mono); background: rgba(12,11,7,.88); padding: .2rem .45rem; pointer-events: none; white-space: nowrap; }
+.shui .legend { position: absolute; right: 1rem; top: .8rem; width: 22rem; background: rgba(12,11,7,.75); padding: .45rem .6rem .5rem; pointer-events: none; }
+.shui .legend i { font-style: normal; font-size: .7rem; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); } .shui .legend div { display: flex; margin-top: .3rem; } .shui .legend div span { flex: 1; height: .55rem; } .shui .legend .n em { flex: 1; font-style: normal; font-size: .66rem; color: var(--dim); text-align: left; }
+.shui .tip { position: absolute; left: 1rem; bottom: .8rem; display: flex; gap: 1.6rem; font-size: .78rem; color: var(--dim); pointer-events: none; text-shadow: var(--halo); }
+
+/* map */
+.shui .scr.map { background: #0e1210; } .shui .scr.map > canvas { position: absolute; inset: 0; cursor: crosshair; }
+.shui .mleg { position: absolute; left: 1.6rem; bottom: 2.6rem; display: flex; flex-direction: column; gap: .3rem; background: rgba(12,11,7,.78); padding: .6rem .8rem; font-size: .8rem; pointer-events: none; }
+.shui .mleg span { display: flex; align-items: center; gap: .5rem; } .shui .mleg i { width: .9rem; height: .6rem; } .shui .mleg i.o { background: none; border: 2px solid var(--tor); } .shui .mleg i.o.svr { border-color: var(--svr); }
+.shui .minfo { position: absolute; right: 1.6rem; bottom: 2.6rem; display: flex; gap: 1rem; align-items: baseline; background: rgba(12,11,7,.78); padding: .5rem .8rem; pointer-events: none; } .shui .minfo:empty { display: none; } .shui .minfo b { color: var(--amber); font-size: 1.1rem; } .shui .minfo span { color: var(--dim); }
+.shui .scr.map .tip { left: 50%; transform: translateX(-50%); }
+
+/* contracts: bulletins on teletype paper */
+.shui .cbody { flex: 1; display: flex; min-height: 0; gap: 2rem; padding: 1.4rem 2rem 2rem; }
+.shui .clist { width: 27rem; flex: none; overflow: auto; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.shui .clist h3 { margin-top: .6rem; } .shui .clist h3:first-child { margin-top: 0; }
+.shui .con { display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto; column-gap: .7rem; padding: .6rem .8rem; background: rgba(242,234,214,.035); align-items: center; }
+.shui .con .tag { grid-row: 1 / 3; font-style: normal; font-size: .62rem; letter-spacing: .12em; font-weight: 700; width: 5.6rem; text-align: center; padding: .25rem 0; color: var(--ink); background: var(--soot3); box-shadow: inset 0 0 0 1px var(--line2); }
+.shui .con .tag.st { background: var(--amber); color: var(--soot); box-shadow: none; }
+.shui .con b { font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .shui .con span { grid-column: 2; color: var(--dim); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .shui .con em { grid-row: 1; grid-column: 3; font-style: normal; font-weight: 700; color: var(--good); display: flex; align-items: center; gap: .25rem; } .shui .con u { grid-row: 2; grid-column: 3; text-decoration: none; font-size: .68rem; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); }
+.shui .con.lock { opacity: .55; } .shui .con.lock em { color: var(--dim); } .shui .con.act { box-shadow: inset 3px 0 0 var(--good); } .shui .con.on { background: rgba(255,176,0,.1); box-shadow: inset 0 0 0 1px var(--amber); } .shui .con:hover { background: rgba(242,234,214,.07); }
+.shui .paper { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; overflow: auto; }
+.shui .sheet { width: min(100%, 44rem); background: var(--paper); color: #1d1a12; padding: 1.6rem 2rem 1.4rem; font: .95rem/1.45 var(--mono); position: relative; box-shadow: 0 1rem 2.6rem rgba(0,0,0,.5); background-image: repeating-linear-gradient(transparent 0 1.38rem, rgba(120,100,60,.08) 1.38rem 1.45rem);
+  -webkit-mask: linear-gradient(#000, #000) content-box, conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / .9rem 100% padding-box; }
+.shui .sheet::before { content: ""; position: absolute; left: .6rem; top: 0; bottom: 0; width: .35rem; background: repeating-linear-gradient(transparent 0 .8rem, rgba(29,26,18,.18) .8rem 1.25rem); }
+.shui .sheet pre { margin: 0; font: inherit; white-space: pre-wrap; } .shui .sheet h3 { color: #1d1a12; font: 700 1.15rem var(--mono); letter-spacing: 0; margin: 0; } .shui .sheet h3::after { display: none; }
+.shui .sheet ol { margin: .2rem 0 0; padding-left: 2rem; } .shui .sheet li { text-transform: uppercase; } .shui .sheet li.done { text-decoration: line-through; color: #7b725c; } .shui .sheet li.now { font-weight: 700; } .shui .sheet li.now::marker { content: "> "; } .shui .sheet li em { font-style: normal; margin-left: .6rem; background: #1d1a12; color: var(--paper); padding: 0 .3rem; }
+.shui .pact { display: flex; align-items: center; gap: 1.4rem; margin-top: 1.4rem; } .shui .lk { color: var(--dim); font-size: .9rem; }
+
+/* garage */
+.shui .bal { font-size: 1.4rem; color: var(--good); }
+.shui .gbody { flex: 1; display: flex; min-height: 0; }
+.shui .vlist { width: 19rem; flex: none; padding: 1.2rem 0 1.2rem 1.6rem; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.shui .veh { display: grid; grid-template-columns: 1fr auto; gap: .1rem .6rem; padding: .6rem .8rem; background: rgba(242,234,214,.035); } .shui .veh b { font-size: 1.05rem; } .shui .veh span { color: var(--dim); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; } .shui .veh em { grid-row: 1 / 3; grid-column: 2; align-self: center; font-style: normal; font-weight: 700; } .shui .veh em.own { color: var(--good); font-size: .8rem; text-transform: uppercase; letter-spacing: .1em; }
+.shui .veh.on { background: rgba(255,176,0,.1); box-shadow: inset 3px 0 0 var(--amber); } .shui .veh:hover { background: rgba(242,234,214,.07); }
+.shui .stage { flex: 1; position: relative; min-width: 0; } .shui .stage canvas { position: absolute; inset: 0; cursor: grab; }
+.shui .vname { position: absolute; left: 2rem; top: 1.4rem; max-width: 26rem; pointer-events: none; } .shui .vname b { font-size: 2.2rem; display: block; line-height: 1; } .shui .vname span { color: var(--amber); text-transform: uppercase; letter-spacing: .14em; font-size: .8rem; } .shui .vname p { color: var(--dim); margin: .5rem 0 0; }
+.shui .svc { position: absolute; left: 2rem; right: 2rem; bottom: 1.4rem; display: flex; gap: .6rem; align-items: stretch; flex-wrap: wrap; } .shui .svc:empty { display: none; }
+.shui .svh { width: 100%; font-size: .75rem; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); }
+.shui .svc button { flex: 1; display: grid; grid-template-columns: auto 1fr auto; grid-template-rows: auto auto; align-items: center; column-gap: .6rem; padding: .55rem .8rem; background: rgba(12,11,7,.82); box-shadow: inset 0 0 0 1px var(--line2); }
+.shui .svc button .ic { grid-row: 1 / 3; width: 1.6rem; height: 1.6rem; color: var(--amber); } .shui .svc button i { grid-column: 2 / 4; height: 3px; background: rgba(242,234,214,.12); } .shui .svc button i s { display: block; height: 100%; background: var(--ink); } .shui .svc button b { color: var(--good); } .shui .svc button:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--amber); }
+.shui .spec { width: 29rem; flex: none; padding: 1.2rem 1.6rem 1.6rem; overflow: auto; border-left: 1px solid var(--line); background: rgba(12,11,7,.5); scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.shui .sbs { display: flex; flex-direction: column; gap: .5rem; } .shui .sb { display: grid; grid-template-columns: 1fr auto; gap: .15rem; } .shui .sb span { color: var(--dim); font-size: .85rem; } .shui .sb b { font-variant-numeric: tabular-nums; } .shui .sb i { grid-column: 1 / -1; display: flex; height: .3rem; background: rgba(242,234,214,.1); } .shui .sb i:not(:has(s[style*="width"])) { display: none; } .shui .sb s { height: 100%; background: var(--ink); } .shui .sb s.plus { background: var(--good); }
+.shui .vbuy { margin: 1.2rem 0 1.4rem; }
+.shui .ups, .shui .gg { display: flex; flex-direction: column; gap: 2px; }
+.shui .up { display: grid; grid-template-columns: 1fr auto; gap: .2rem .8rem; padding: .6rem .7rem; background: rgba(242,234,214,.035); align-items: center; }
+.shui .up > div { display: flex; align-items: center; gap: .6rem; } .shui .up b { font-size: 1rem; } .shui .pips { display: flex; gap: 2px; } .shui .pips s { width: .9rem; height: .3rem; background: var(--line); } .shui .pips s.on { background: var(--amber); }
+.shui .up p { grid-column: 1; margin: 0; color: var(--dim); font-size: .8rem; line-height: 1.3; } .shui .up > span { grid-column: 1; font-size: .8rem; color: var(--good); }
+.shui .up > button, .shui .up > em { grid-column: 2; grid-row: 1 / 4; font-style: normal; } .shui .up > button { padding: .45rem .8rem; background: var(--amber); color: var(--soot); font-weight: 700; white-space: nowrap; } .shui .up > button:hover:not(:disabled) { background: var(--amber2); } .shui .up > em { color: var(--good); font-size: .8rem; text-transform: uppercase; letter-spacing: .12em; } .shui .up.max { opacity: .7; }
+.shui .gear { flex: 1; overflow: auto; padding: 1.4rem 2rem 2rem; } .shui .gg { display: grid; grid-template-columns: repeat(auto-fill, minmax(32rem, 1fr)); gap: .6rem; }
+
+/* album */
+.shui .abody { flex: 1; display: flex; gap: 2rem; padding: 1.4rem 2rem 2rem; min-height: 0; }
+.shui .album .grid { width: 31rem; flex: none; overflow: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; align-content: start; scrollbar-width: thin; scrollbar-color: var(--line2) transparent; }
+.shui .album .grid .none { grid-column: 1 / -1; }
+.shui .ph { position: relative; background: var(--paper); padding: .25rem .25rem .3rem; color: var(--soot); display: flex; flex-direction: column; gap: .15rem; } .shui .ph .im { aspect-ratio: 16 / 9; background: #2a2a24 center / cover; } .shui .ph b { font-size: .72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .shui .ph .stars svg { width: .7rem; height: .7rem; } .shui .ph .stars svg:not(.on) { stroke: #a99f82; } .shui .ph i { position: absolute; right: .3rem; top: .3rem; font-style: normal; font-size: .6rem; background: var(--amber); padding: 0 .25rem; letter-spacing: .1em; text-transform: uppercase; }
+.shui .ph.on { outline: 3px solid var(--amber); outline-offset: 1px; }
+.shui .big { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; } .shui .big .print { width: min(100%, 52rem); padding: .8rem .8rem 0; box-shadow: 0 1rem 3rem rgba(0,0,0,.5); }
+.shui .big .meta { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; align-items: center; margin-top: 1rem; color: var(--dim); } .shui .big .meta i { font-style: normal; font-size: .7rem; letter-spacing: .12em; padding: .1rem .35rem; background: var(--ink); color: var(--soot); }
+
+/* narrow / short */
+@media (max-aspect-ratio: 3/2) { .shui .compass { width: 36rem; margin-left: -18rem; } .shui .bc { width: 44rem; } .shui .tl { width: 19rem; } .shui .keys, .shui .loop { grid-template-columns: repeat(2, 1fr); } }
+.shui .hud.vfon .tr { opacity: 0; } .shui .hud.vfon .bc { bottom: 7.6rem; }
+.shui .go:focus { outline: none; } .shui.keynav .go:focus .wp { fill: var(--ink); }

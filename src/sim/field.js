@@ -159,7 +159,7 @@ export function createField(S) {
   }
   const diurnal = () => Math.sin((ctx.time.hour - 9.5) / 24 * Math.PI * 2);
   function cape(x, z) {
-    const b = ctx.world?.biomeAt(x, z), hum = b ? b.humidity ?? 0.6 : 0.6, pr = b ? b.tornadoProb ?? 0.5 : 0.5, g = 0.5 + 0.5 * gnoise(x / 14000 + env.day * 3.1, z / 14000, 61);
+    const b = ctx.world?.biomeAt?.(x, z), hum = b ? b.humidity ?? 0.6 : 0.6, pr = b ? b.tornadoProb ?? 0.5 : 0.5, g = 0.5 + 0.5 * gnoise(x / 14000 + env.day * 3.1, z / 14000, 61);
     return Math.max(0, (600 + 2200 * pr + 1500 * hum) * (0.45 + 0.75 * g) * (0.75 + 0.3 * diurnal()) * (1 - 0.8 * coldPool(x, z)));
   }
   const W = {};
@@ -180,7 +180,7 @@ export function createField(S) {
     }
     // rain shafts: streaky modulation
     const sh2 = 1 + 0.35 * gnoise(x / 210, z / 210 + ctx.time.now / 25, 64), rain = Math.pow(clamp((e - 17) / 43), 1.25) * clamp(sh2, 0.5, 1.3);
-    const b = ctx.world?.biomeAt(x, z), hum = b ? b.humidity ?? 0.6 : 0.6, cp = coldPool(x, z), dn = diurnal(), g = ground(x, z);
+    const b = ctx.world?.biomeAt?.(x, z), hum = b ? b.humidity ?? 0.6 : 0.6, cp = coldPool(x, z), dn = diurnal(), g = ground(x, z);
     out.rain = clamp(rain); out.hail = hail > 0.04 ? clamp(hail) : 0; out.hailCm = hail > 0.04 ? hailCm : 0; out.dbz = e; out.cloud = clamp(cover); out.dark = clamp(Math.max(dark, rain * 0.8)); out.lightning = lrate;
     out.temp = 25.5 + 4.5 * dn + z / 31500 * 4.5 - g * 0.0065 - 8.5 * cp - 2.5 * dark; out.dewpoint = Math.min(out.temp - 0.4, lerp(8, 22, hum) + z / 31500 * 2.5 - 1.5 * cp);
     let ext = 1 / lerp(45000, 18000, hum) + 1 / 420 * Math.pow(out.rain, 1.35) + (out.hail > 0 ? out.hail / 2500 : 0);

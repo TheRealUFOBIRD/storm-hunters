@@ -23,7 +23,7 @@ export function mainScreen(ui) {
   } };
 }
 export function drawOutlook(ui, c, o = {}) {
-  const { ctx } = ui, d = fitCanvas(c), g = c.getContext('2d'), w = c.width, hh = c.height, b = ctx.world.bounds, s = Math.min(w / (b.maxX - b.minX), hh / (b.maxZ - b.minZ)), v = { cx: 0, cz: 0, s, w, h: hh, dpr: d }, O = ui.overlay; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, w, hh); const m = ui.mapCanvas(); if (m) { O.apply(g, v); g.drawImage(m, b.minX, b.minZ, b.maxX - b.minX, b.maxZ - b.minZ); g.setTransform(1, 0, 0, 1, 0, 0); } O.outlook(g, v); for (const st of ctx.storms.list || []) { if (st.menu) continue; } if (o.cities) { for (const k of ctx.world.cities || []) { const q = O.pt(v, k.x, k.z), on = k.name === o.sel, hv = k.name === o.hover; g.fillStyle = on ? '#ffb000' : hv ? '#fff' : '#f2ead6'; g.strokeStyle = '#120f08'; g.lineWidth = 2 * d; g.beginPath(); g.arc(q.x, q.y, (on ? 6 : hv ? 5 : 3.4) * d, 0, TAU); g.stroke(); g.fill(); } O.cities(g, v, { size: 11 }); const k = (ctx.world.cities || []).find((k) => k.name === o.sel); if (k) { const q = O.pt(v, k.x, k.z); O.flag(g, q.x, q.y - 4 * d, d, '#ffb000'); } }
+  const { ctx } = ui, d = fitCanvas(c), g = c.getContext('2d'), w = c.width, hh = c.height, b = ctx.world.bounds || { minX: -50000, maxX: 50000, minZ: -31500, maxZ: 31500 }, s = Math.min(w / (b.maxX - b.minX), hh / (b.maxZ - b.minZ)), v = { cx: 0, cz: 0, s, w, h: hh, dpr: d }, O = ui.overlay; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, w, hh); const m = ui.mapCanvas(); if (m) { O.apply(g, v); g.drawImage(m, b.minX, b.minZ, b.maxX - b.minX, b.maxZ - b.minZ); g.setTransform(1, 0, 0, 1, 0, 0); } O.outlook(g, v); for (const st of ctx.storms.list || []) { if (st.menu) continue; } if (o.cities) { for (const k of ctx.world.cities || []) { const q = O.pt(v, k.x, k.z), on = k.name === o.sel, hv = k.name === o.hover; g.fillStyle = on ? '#ffb000' : hv ? '#fff' : '#f2ead6'; g.strokeStyle = '#120f08'; g.lineWidth = 2 * d; g.beginPath(); g.arc(q.x, q.y, (on ? 6 : hv ? 5 : 3.4) * d, 0, TAU); g.stroke(); g.fill(); } O.cities(g, v, { size: 11 }); const k = (ctx.world.cities || []).find((k) => k.name === o.sel); if (k) { const q = O.pt(v, k.x, k.z); O.flag(g, q.x, q.y - 4 * d, d, '#ffb000'); } }
   return v;
 }
 
@@ -47,7 +47,7 @@ export function joinScreen(ui) {
 }
 
 export function crewList(ui) {
-  const { ctx } = ui, n = ctx.net || {}, me = { name: ctx.settings.get('name') || n.self?.name || 'You', color: n.self?.color ?? '#ffb000', me: true, host: n.role === 'host' }; const L = [me, ...[...(n.peers?.values?.() || [])].map((p) => ({ name: p.name, color: p.color, ping: p.ping, host: p.id === n.hostId || p.host }))];
+  const { ctx } = ui, n = ctx.net || {}, me = { name: ctx.settings.get('name') || n.self?.name || 'You', color: n.self?.color ?? '#ffb000', me: true, host: n.role === 'host' }; const L = [me, ...[...(n.peers?.values?.() || [])].map((p) => ({ name: p.name, color: p.color, ping: p.ping, host: (n.hostId != null && p.id === n.hostId) || p.host === true }))];
   return L.map((p) => `<li><i style="background:${css(p.color)}"></i><b>${esc(p.name || 'Chaser')}</b>${p.me ? '<span>you</span>' : ''}${p.host ? '<em>Host</em>' : ''}${p.ping != null && !p.me ? `<u>${Math.round(p.ping)} ms</u>` : ''}</li>`).join('');
 }
 export function lobbyScreen(ui) {

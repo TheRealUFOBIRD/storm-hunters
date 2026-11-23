@@ -45,6 +45,6 @@ export function stepStorm(st, dt, now, world, bounds) {
   m.x = st.x - fx * st.radius * 0.06 - fz * st.radius * 0.07; m.z = st.z - fz * st.radius * 0.06 + fx * st.radius * 0.07;
   const u = sc ? 0.95 : st.type === 'squall' ? -0.25 : 0, v = sc ? -0.62 : 0;
   st.rain.x = m.x + R * (fx * u - fz * v); st.rain.z = m.z + R * (fz * u + fx * v); st.rain.ox = st.rain.x - st.x; st.rain.oz = st.rain.z - st.z; st.rain.r = R * (sc ? 0.85 : 1); st.rain.rate = clamp(st.intensity * 1.05 * ss(G * 0.35, G, a));
-  if (world && (!st._gt || now - st._gt > 2)) { st._gt = now; st.y0 = world.heightAt(m.x, m.z); }
+  if (world && (!st._gt || now - st._gt > 2)) { st._gt = now; st.y0 = world.heightAt?.(m.x, m.z); }
   st.done = a >= L;
 }

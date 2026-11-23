@@ -93,12 +93,12 @@ export function stepTornado(t, dt, now, world, parent) {
     if (t.ex || t.ez) { const q = 1 - Math.exp(-dt * 1.6); t.x += t.ex * q; t.z += t.ez * q; t.ex *= 1 - q; t.ez *= 1 - q; } // network correction
   }
   if (world) {
-    const g = world.heightAt(t.x, t.z); t.y0 = t.age <= dt * 1.5 || Math.abs(g - t.y0) > 400 ? g : t.y0 + (g - t.y0) * (1 - Math.exp(-dt * 1.2));
+    const g = world.heightAt?.(t.x, t.z) ?? 0; t.y0 = t.age <= dt * 1.5 || Math.abs(g - t.y0) > 400 ? g : t.y0 + (g - t.y0) * (1 - Math.exp(-dt * 1.2));
     if (!t._bioT || now - t._bioT > 1.5) {
-      t._bioT = now; const b = world.biomeAt(t.x, t.z), wet = world.waterLevelAt(t.x, t.z) > g;
-      t.humidity = b.humidity ?? 0.6; t.overWater = wet; t.biome = b.id;
-      t.dustiness = wet ? 0.25 : b.id === 'forest' ? 0.5 : b.id === 'swamp' || b.id === 'coast' ? 0.35 : b.id === 'urban' ? 0.9 : 0.8;
-      const c = wet ? [0.62, 0.66, 0.68] : b.dustColor || [0.42, 0.32, 0.22]; t._dc = c; if (t.age < 2) for (let i = 0; i < 3; i++) t.dustColor[i] = c[i];
+      t._bioT = now; const b = world.biomeAt?.(t.x, t.z), wet = world.waterLevelAt?.(t.x, t.z) > g;
+      t.humidity = b?.humidity ?? 0.6; t.overWater = wet; t.biome = b?.id;
+      t.dustiness = wet ? 0.25 : b?.id === "forest" ? 0.5 : b?.id === "swamp" || b?.id === "coast" ? 0.35 : b?.id === "urban" ? 0.9 : 0.8;
+      const c = wet ? [0.62, 0.66, 0.68] : b?.dustColor || [0.42, 0.32, 0.22]; t._dc = c; if (t.age < 2) for (let i = 0; i < 3; i++) t.dustColor[i] = c[i];
     }
     if (t._dc) for (let i = 0; i < 3; i++) t.dustColor[i] += (t._dc[i] - t.dustColor[i]) * Math.min(1, dt * 0.25);
   }

@@ -121,15 +121,15 @@ export function makeSampler(data) {
   }
   // ---- nearest road
   const nr = { x: 0, z: 0, y: 0, dist: 1e9, dirX: 0, dirZ: -1, width: 8, name: '', kind: '', road: -1, seg: -1, s: 0 };
-  function nearest(x, z, maxKind = 3) {
+  function nearest(x, z, maxKind = 3, noStreet = false) {
     const ci = Math.floor((x - ROX) / RC), cj = Math.floor((z - ROZ) / RC); let best = 1e18, bs = -1, bt = 0, stop = 40;
     for (let r = 0; r <= stop && r < 40; r++) {
       for (let j = cj - r; j <= cj + r; j++) { if (j < 0 || j >= RGZ) continue; const edge = j === cj - r || j === cj + r; for (let i = ci - r; i <= ci + r; i += edge ? 1 : Math.max(1, 2 * r)) {
-        if (i < 0 || i >= RGX) continue; const c = j * RGX + i; for (let q = segIdx.off[c], e = segIdx.off[c + 1]; q < e; q++) { const s = segIdx.ref[q]; if (KR[SR[s]] > maxKind) continue; const a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az; let t = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - ax - dx * t, ez = z - az - dz * t, d = ex * ex + ez * ez; if (d < best) { best = d; bs = s; bt = t; } }
+        if (i < 0 || i >= RGX) continue; const c = j * RGX + i; for (let q = segIdx.off[c], e = segIdx.off[c + 1]; q < e; q++) { const s = segIdx.ref[q]; { const kk = KR[SR[s]]; if (kk > maxKind || (noStreet && kk === 2)) continue; } const a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az; let t = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - ax - dx * t, ez = z - az - dz * t, d = ex * ex + ez * ez; if (d < best) { best = d; bs = s; bt = t; } }
       } }
       if (bs >= 0 && stop === 40) stop = Math.min(39, Math.ceil(Math.sqrt(best) / RC) + (r === 0 ? 0 : 0));
     }
-    if (bs < 0) for (let s = 0; s < seg.n; s += 6) { if (KR[SR[s]] > maxKind) continue; const ex = S[s * 6] - x, ez = S[s * 6 + 1] - z, d = ex * ex + ez * ez; if (d < best) { best = d; bs = s; bt = 0; } }
+    if (bs < 0 || best > (38 * RC) ** 2) for (let s = 0; s < seg.n; s++) { { const kk = KR[SR[s]]; if (kk > maxKind || (noStreet && kk === 2)) continue; } const a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az; let t = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - ax - dx * t, ez = z - az - dz * t, d = ex * ex + ez * ez; if (d < best) { best = d; bs = s; bt = t; } }
     if (bs < 0) return nr; const a = bs * 6, dx = S[a + 2] - S[a], dz = S[a + 3] - S[a + 1], l = Math.sqrt(dx * dx + dz * dz) || 1, rd = data.roads[SR[bs]];
     nr.x = S[a] + dx * bt; nr.z = S[a + 1] + dz * bt; nr.y = S[a + 4] + (S[a + 5] - S[a + 4]) * bt; nr.dist = Math.sqrt(best); nr.dirX = dx / l; nr.dirZ = dz / l; nr.width = rd.hw * 2; nr.name = rd.name; nr.kind = rd.kind; nr.road = rd.id; nr.seg = bs; nr.s = rd.s[seg.I[bs]] + l * bt; return nr;
   }

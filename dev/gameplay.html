@@ -1,0 +1,24 @@
+<!doctype html><html><head><meta charset="utf-8"><title>dev gameplay</title><link rel="stylesheet" href="../css/ui.css">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#game{position:fixed;inset:0;width:100%;height:100%}#ui{position:fixed;inset:0;pointer-events:none}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.module.min.js","three/addons/":"../vendor/three/addons/"}}</script></head>
+<body><canvas id="game"></canvas><div id="ui"></div>
+<script type="module">
+// Tool view-models + world props.  ?tool=camera|scanner|probe|drone|binoculars|anemometer|props  &real=gfx,world,storms  &aim=1
+import * as THREE from 'three';
+import { createContext, loadSystems, stepFrame } from '../src/core/context.js';
+import { mocks } from '../src/core/mocks.js';
+const q = new URLSearchParams(location.search), tool = q.get('tool') || 'camera', real = (q.get('real') ?? 'gfx').split(',').filter(Boolean);
+const ctx = window.ctx = createContext(document.getElementById('game'));
+mocks.player = (c) => ({ mock: true, mode: 'foot', pos: new THREE.Vector3(0, 0, 400), heading: 5.9, pitch: 0, vehicle: null, health: 1, teleport() {}, enter() {}, exit() {}, update() {} });
+await loadSystems(ctx, ['gameplay', 'ui', ...real]);
+await ctx.world.ready; ctx.state = 'playing'; ctx.ui.ready = true; ctx.ui.hideHud = q.get('hud') !== '1';
+const gy = ctx.world.heightAt(0, 400); ctx.player.pos.y = gy; ctx.camera.position.set(0, gy + 1.7, 400); ctx.camera.lookAt(-500, gy + 120, -1500); ctx.time.hour = +(q.get('hour') || 16.5);
+if (!ctx.renderer) { const r = new THREE.WebGLRenderer({ canvas: ctx.canvas, antialias: true }); r.setSize(innerWidth, innerHeight, false); r.toneMapping = THREE.ACESFilmicToneMapping; const { RoomEnvironment } = await import('three/addons/environments/RoomEnvironment.js'); const pm = new THREE.PMREMGenerator(r); ctx.scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture; ctx.scene.background = new THREE.Color(0x6b737a); const g = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshStandardMaterial({ color: 0x5a5a3a, roughness: 1 })); g.rotation.x = -Math.PI / 2; ctx.scene.add(g, new THREE.HemisphereLight(0xcfd8e0, 0x4a4436, 1.2)); const s = new THREE.DirectionalLight(0xffeedd, 2.5); s.position.set(3, 4, 2); ctx.scene.add(s); ctx.gfx = { mock: true, render() { r.autoClear = true; r.render(ctx.scene, ctx.camera); r.autoClear = false; r.clearDepth(); r.render(ctx.viewScene, ctx.camera); } }; }
+ctx.events.emit('game:started', { mode: 'solo' }); ctx.ui.forceClose();
+const G = ctx.gameplay;
+if (tool === 'props') { const p = G.tools.probes.deploy(0.4, 397.6, true); const d = G.drone; d.launch(-1.2, gy + 1.5, 397.4, 0); ctx.player.cameraOverride = null; ctx.player.mode = 'foot'; ctx.camera.position.set(1.6, gy + 1.2, 399.5); ctx.camera.lookAt(-0.4, gy + 0.6, 397.2); d.battery = 9; }
+else { G.selectTool(tool); if (q.get('aim')) { G.tools.st.aiming = true; G.tools.st.raise = 0.6; } }
+let last = performance.now();
+(function loop(t) { const dt = Math.max(.001, (t - last) / 1000) || .016; last = t; stepFrame(ctx, dt); requestAnimationFrame(loop); })(last);
+window.ready = true;
+</script></body></html>

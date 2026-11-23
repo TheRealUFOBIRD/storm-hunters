@@ -79,7 +79,7 @@ export async function create(ctx, opt = {}) {
     if (type === 'net:tool' && p) {
       if (!data || typeof data !== 'object' || typeof data.kind !== 'string') return;
       const pos = ['x', 'y', 'z'].every((k) => isNum(data[k]) && Math.abs(data[k]) < 6e4), o = { ...data, kind: cleanText(data.kind, 16), id: from, name: p.name, color: p.color };
-      if (o.kind === 'photo' && pos && o.flash) remotes.flash(o.x, o.y, o.z); else if (o.kind === 'probe' && pos && !ctx.gameplay?.handlesNetTool) remotes.probe(from, o.x, o.y, o.z); else if (o.kind === 'probes:clear') remotes.clearProbes(from);
+      if (o.kind === 'photo' && pos && o.flash) remotes.flash(o.x, o.y, o.z); else if (o.kind === 'probe' && pos && !(ctx.gameplay?.handlesNetTool || ctx.gameplay?.tools || (ctx.gameplay && !ctx.gameplay.mock && ctx.gameplay.probes))) remotes.probe(from, o.x, o.y, o.z); else if (o.kind === 'probes:clear') remotes.clearProbes(from);
       ev.emit('net:tool', o);
     }
     const h = handlers.get(type); if (h) for (const f of [...h]) { try { f(data, from); } catch (e) { console.error('[net on ' + type + ']', e); } }

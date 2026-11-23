@@ -120,7 +120,7 @@ export function scannerModel() {
   const scr = screenMesh(0.144, 0.096, cv, 1.5); scr.position.z = 0.0107; hd.add(scr); for (let i = 0; i < 4; i++) add(hd, rb(0.008, 0.006, 0.003, 0.0015), i ? m.body2 : m.led, 0.0745, 0.03 - i * 0.02, 0.0112);
   add(hd, rb(0.026, 0.05, 0.02, 0.006), m.steel, 0, -0.07, -0.014, 0.3); g.add(tubeMesh([[0.04, 0.06, 0.05], [0.085, 0.07, 0.07], [0.075, 0.12, 0.05], [0.06, 0.125, 0.03]], 0.004, m.cable));
   const lb = label('X-BAND 9.4 GHz', 0.07, 0.011, { k: 0.8, fg: '#1a1208' }); place(lb, 0.0415, 0.06, -0.02, 0, Math.PI / 2); g.add(lb);
-  const r = hand(1.0); place(r, 0.012, -0.03, 0.06, 0.75, 0.15, 0.1); r.rotateZ(1.4); g.add(r); const l = hand(0.65, true); place(l, -0.055, 0.035, -0.03, 0.2, 0.35, -1.1); g.add(l);
+  const r = hand(1.0); place(r, 0.012, -0.03, 0.06, 0.75, 0.15, 0.1); r.rotateZ(1.4); g.add(r); const l = hand(0.85, true); place(l, -0.098, 0.13, 0.03, -0.42, 0, Math.PI / 2); g.add(l);
   g.userData = { canvas: cv, screen: scr, dish: d, ring }; return g;
 }
 

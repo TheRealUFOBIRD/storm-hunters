@@ -5,7 +5,7 @@ import { TERRAIN_COMMON } from './terrain.js';
 export const SS = 512, SOX = -51200, SOZ = -32768, SGX = 200, SGZ = 128;
 
 export function createRoadMaterial(ctx, tex, shared, far) {
-  const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, fog: false, polygonOffset: true, polygonOffsetFactor: far ? -1 : -2, polygonOffsetUnits: far ? -2 : -4 });
+  const m = new THREE.MeshStandardMaterial({ roughness: 1, metalness: 0, fog: false });
   m.name = far ? 'road-far' : 'road'; m.customProgramCacheKey = () => 'sh-road-' + (far ? 'far' : 'near');
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uGA: { value: tex.gA.texture }, uGN: { value: tex.gN.texture }, uWetness: ctx.globals.uWetness, uRain: ctx.globals.uRain, uTime: ctx.globals.uTime, uBioA: shared.uBioA, uBioB: shared.uBioB, uDmg: shared.uDmg, uDmgOrg: shared.uDmgOrg, uSec: shared.uSec });
@@ -21,7 +21,7 @@ export function createRoadMaterial(ctx, tex, shared, far) {
       if(vRd.w<(kind>1.5?.15:-.6)&&kind<3.5) discard;
       float hw=kind<.5?10.2:(kind<1.5?5.2:5.); if(kind>1.5&&kind<2.5){ float ds=abs(fract(s/132.+.5)-.5)*132.; if(au>5.05&&(ds<7.6||vRd.w<3.)) discard; }
       float n0=texture(uGA,vec3(p/6.1,${L.dirt}.)).a,n1=texture(uGA,vec3(p/47.,${L.dirt}.)).a,n2=texture(uGA,vec3(p/310.,${L.dirt}.)).a;
-      vec4 a=texture(uGA,vec3(p/1.9,${L.asphalt}.)),b=texture(uGN,vec3(p/1.9,${L.asphalt}.)); vec4 a2=texture(uGA,vec3(p.yx/9.7,${L.asphalt}.)); float fd=smoothstep(15.,70.,dist); vec3 c=a.rgb*a.rgb; c=mix(c,a2.rgb*a2.rgb,fd*.6); float R=b.b; vec3 nl=vec3((b.rg*2.-1.)*(1.-fd),1.);
+      vec4 a=texture(uGA,vec3(p/1.05,${L.asphalt}.)),b=texture(uGN,vec3(p/1.05,${L.asphalt}.)); vec4 a2=texture(uGA,vec3(p.yx/9.7,${L.asphalt}.)); float fd=smoothstep(15.,70.,dist); vec3 c=a.rgb*a.rgb; c=mix(c,a2.rgb*a2.rgb,fd*.6); c=mix(c,vec3(dot(c,vec3(.33))),.6)*vec3(1.55,1.5,1.42); float R=b.b; vec3 nl=vec3((b.rg*2.-1.)*(1.-fd)*.35,1.);
       float age=smoothstep(.36,.58,n2+(n1-.45)*.3); c*=mix(.72,1.28,age)*(.86+.3*n1);
       float mk=0.,yl=0.; float px=max(fwidth(u),.002),ps=max(fwidth(s),.002); float lane=3.7; float lc=0.; float trk=0.;
       if(kind<1.5){
@@ -41,7 +41,7 @@ export function createRoadMaterial(ctx, tex, shared, far) {
         if(kind>.5&&vRd.w<9.) { mk*=step(6.,vRd.w); yl*=step(6.,vRd.w); }
         float cv=clamp(px>.35?.6:1.,0.,1.); c=mix(c,vec3(.62,.61,.57)*(.75+.35*a.a),clamp(mk,0.,1.)*wear*.92*cv); c=mix(c,vec3(.56,.36,.045)*(.8+.35*a.a),clamp(yl,0.,1.)*wear*.95*cv); R=mix(R,.62,clamp(mk+yl,0.,1.)*wear);
         // shoulder dirt, ragged gravel edge
-        float ed=hw-au; float sh=smoothstep(1.7,0.,ed+(n0-.45)*1.4); float red=texture2D(uBioA,bioUv(p)).b; vec4 gv=texture(uGA,vec3(p/2.1,${L.gravel}.)),gb=texture(uGN,vec3(p/2.1,${L.gravel}.)); vec3 gc=gv.rgb*gv.rgb*mix(vec3(1.),vec3(1.2,.85,.62),red*.75); float gm=smoothstep(.32,-.1,ed+(n0-.45)*1.1+(gv.a-.5)*.4); c=mix(c,gc*.85,sh*.28); c=mix(c,gc*.9,gm); R=mix(R,.92,gm); nl=mix(nl,vec3(gb.rg*2.-1.,1.),gm);
+        float ed=hw-au; float sh=smoothstep(1.7,0.,ed+(n0-.45)*1.4); float red=texture2D(uBioA,bioUv(p)).b; vec4 gv=texture(uGA,vec3(p/1.3,${L.gravel}.)),gb=texture(uGN,vec3(p/1.3,${L.gravel}.)); vec3 gc=gv.rgb*gv.rgb*mix(vec3(1.),vec3(1.2,.85,.62),red*.75); float gm=smoothstep(.32,-.1,ed+(n0-.45)*1.1+(gv.a-.5)*.4); c=mix(c,gc*.85,sh*.28); c=mix(c,gc*.62,gm); R=mix(R,.92,gm); nl=mix(nl,vec3(gb.rg*2.-1.,1.),gm);
       } else if(kind<2.5){
         if(au>4.98){ vec4 k=texture(uGA,vec3(p/2.7,${L.concrete}.)),kb=texture(uGN,vec3(p/2.7,${L.concrete}.)); c=k.rgb*k.rgb*(.8+.3*n1); R=kb.b; float j=abs(fract(s/1.5)-.5)*1.5; c*=1.-.4*ln(j,0.,.02,ps)*smoothstep(.2,.02,ps); c*=1.-.35*ln(au,5.06,.12,px); }
         else { trk=smoothstep(.6,.1,abs(abs(au-2.3)-.85)); c*=1.-trk*.08; float nd=abs(fract(s/132.+.5)-.5)*132.; yl=(ln(u,.1,.1,px)+ln(u,-.1,.1,px))*step(9.,nd)*.75; float cw=step(5.6,nd)*step(nd,8.4)*step(.5,fract(u/1.1))*.8; mk=cw*smoothstep(.5,.1,px); float wear=smoothstep(.25,.55,a.a*.5+n0*.6+n1*.2); c=mix(c,vec3(.6),mk*wear*.8); c=mix(c,vec3(.55,.36,.05),yl*wear*.8); float pl=smoothstep(.25,.0,abs(au-4.75)); c*=1.-pl*.25; }

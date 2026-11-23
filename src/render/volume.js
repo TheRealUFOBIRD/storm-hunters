@@ -103,9 +103,9 @@ float tornadoDens(int i,vec3 p,float lod,float dist,bool hq,out float dust,out f
   float sg=0.; hint=1e5;
   float th0=sp*c.w;
   float tw=sp*h*1.15/max(b.x,20.);
-  if(R>.6&&h>-30.){
-    hint=r-R*1.12;
-    if(r<R*1.75+30.){
+  if((R>.6||e.w>.01)&&h>-30.){
+    hint=R>.6?r-R*1.12:1e5;
+    if(R>.6&&r<R*1.75+30.){
       float Rs=pow(R,.55)*pow(max(b.x,12.),.45);
       vec2 q0=rot2(q,th0+tw+sp*dw*(f0-.5)*TP), q1=rot2(q,th0+tw+sp*dw*(f1-.5)*TP);
       vec3 s0=vec3(q0.x/Rs,(h-e.y)/(b.x*1.5),q0.y/Rs), s1=vec3(q1.x/Rs,(h-e.y)/(b.x*1.5),q1.y/Rs);
@@ -137,11 +137,11 @@ float tornadoDens(int i,vec3 p,float lod,float dist,bool hq,out float dust,out f
     // sub-vortices
     if(e.w>.01&&r<R*1.6+c.x){
       for(int k=0;k<4;k++){ vec4 s=uSub[i*4+k]; if(s.z<.03) continue;
-        float hs=min(a.w*.85,s.w*26.); if(h>hs) continue;
-        float an=s.x-sp*h*.55/max(s.y,20.); float orb=s.y*mix(1.,R/max(b.x,10.),.45*sat(h/a.w)); vec2 qs=q-vec2(cos(an),sin(an))*orb; float rs=length(qs);
+        float hs=min(a.w*.42,s.w*9.); if(h>hs) continue;
+        float an=s.x-sp*h*.22/max(s.y,20.); float orb=s.y*mix(1.,R/max(b.x,10.),.45*sat(h/a.w)); vec2 qs=q-vec2(cos(an),sin(an))*orb; float rs=length(qs);
         float Rr=s.w*(.55+.75*h/hs)*smoothstep(hs,hs*.55,h); if(rs>Rr*2.+12.) { hint=min(hint,rs-Rr*1.5); continue; }
         vec2 qq=rot2(qs,sp*(uTime*min(vm/max(s.w,6.),2.6)+h*.06)); vec4 sn=textureLod(uDetail,vec3(qq.x,h*.3-e.y*.4,qq.y)/(s.w*2.6),lod);
-        float ds=rs-Rr*(1.+.55*(sn.g-.5)); sg=max(sg,clamp(6./Rr,.02,.4)*smoothstep(Rr*.1,-Rr*.28,ds)*s.z); hint=min(hint,ds);
+        float ds=rs-Rr*(1.+.55*(sn.g-.5)); sg=max(sg,clamp(5./Rr,.02,.3)*smoothstep(Rr*.15,-Rr*.4,ds)*s.z*smoothstep(hs,hs*.35,h)); hint=min(hint,ds);
       }
     }
   }
