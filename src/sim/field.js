@@ -126,6 +126,12 @@ export function createField(S) {
       const tb = vm * 0.17 * touch * Math.exp(-q * 0.42) * (0.4 + 0.6 * Math.min(1, q)), ts = now * 0.9, f = 1 / (14 + rc * 0.16);
       out.x += tb * gnoise(x * f + ts * 1.7, z * f + h * 0.02, 41); out.z += tb * gnoise(x * f - ts, z * f + ts * 1.3 - h * 0.02, 42); out.y += tb * 0.8 * gnoise(x * f + h * 0.03 - ts * 1.1, z * f + ts * 0.7, 43);
     }
+    // gameplay: the inside of the funnel is never a safe "eye" near the ground. Debris-laden suction-vortex chaos
+    // (stands in for unresolved multiple vortices) keeps the whole core lethal, strongest just inside the wall.
+    if (q < 1 && hk < 0.5) {
+      const c = vm * touch * fade * (0.85 - 0.15 * q) * (1 - hk * 2), ts = now * 2.3, f = 1 / (6 + rc * 0.05);
+      out.x += c * 1.15 * gnoise(x * f + ts, z * f, 44); out.z += c * 1.15 * gnoise(x * f, z * f - ts, 45); out.y += c * (0.5 + 0.25 * gnoise(x * f - ts, z * f + ts, 46));
+    }
   }
   function windAt(x, y, z, out) {
     const now = ctx.time.now, h = Math.max(0, y - ground(x, z));
