@@ -10,13 +10,24 @@ export function createInput(canvas) {
   const held = new Map(), press = new Set(), rel = new Set(), padHeld = new Set();
   const typing = () => { const e = document.activeElement; return e && (e.tagName === 'INPUT' || e.tagName === 'TEXTAREA' || e.isContentEditable); };
   const dz = (v) => (Math.abs(v || 0) < 0.12 ? 0 : (v - Math.sign(v) * 0.12) / 0.88), k = (a) => (held.get(a) > 0 ? 1 : 0);
+  // A connected-but-idle controller (or a wheel/pedal set reporting a non-zero rest value) must never feed
+  // throttle/brake/steer while the player uses the keyboard: pad values only count after the pad is actually used,
+  // measured against the values it reported when first seen.
+  let padBase = null, padId = '';
+  const padActive = () => I.usingPad && I.pad;
+  const padMoved = (p) => {
+    if (!padBase || padId !== p.id) { padId = p.id; padBase = { a: [...p.axes], b: p.buttons.map((b) => b.value) }; return false; }
+    for (let i = 0; i < p.axes.length; i++) if (Math.abs(p.axes[i] - (padBase.a[i] ?? 0)) > 0.35) return true;
+    for (let i = 0; i < p.buttons.length; i++) if (Math.abs(p.buttons[i].value - (padBase.b[i] ?? 0)) > 0.35) return true;
+    return false;
+  };
   const I = {
     uiBlock: false, captured: false, mouse: { dx: 0, dy: 0, wheel: 0, left: false, right: false, leftPressed: false, rightPressed: false, x: 0, y: 0 }, pad: null, usingPad: false,
     down: (a) => !I.uiBlock && (held.get(a) > 0 || padHeld.has(a)),
     pressed: (a) => press.has(a) && (!I.uiBlock || MENU.has(a)),
     consume: (a) => press.delete(a), released: (a) => rel.has(a),
     axis(n) {
-      if (I.uiBlock) return 0; const p = I.pad;
+      if (I.uiBlock) return 0; const p = padActive() ? I.pad : null;
       switch (n) {
         case 'steer': case 'moveX': return (k('right') - k('left')) || (p ? dz(p.axes[0]) : 0);
         case 'moveY': return (k('forward') - k('back')) || (p ? -dz(p.axes[1]) : 0);
@@ -26,19 +37,22 @@ export function createInput(canvas) {
       }
       return 0;
     },
-    steerIsAnalog: () => !!(I.pad && Math.abs(I.pad.axes[0]) > 0.12),
+    steerIsAnalog: () => !!(padActive() && Math.abs(I.pad.axes[0]) > 0.12),
     inject(a, on) { if (on) { if (!(held.get(a) > 0)) press.add(a); held.set(a, 1); } else { held.set(a, 0); rel.add(a); } },
     requestCapture() { if (!I.uiBlock && document.pointerLockElement !== canvas) { try { canvas.requestPointerLock?.()?.catch?.(() => {}); } catch { /* denied */ } } },
     releaseCapture() { if (document.pointerLockElement) document.exitPointerLock(); },
     poll() {
       const ps = navigator.getGamepads ? navigator.getGamepads() : []; I.pad = null;
       for (const p of ps) if (p && p.connected && p.mapping === 'standard') { I.pad = p; break; }
-      if (I.pad) for (const i in PAD) { const b = I.pad.buttons[i]?.pressed, a = PAD[i]; if (b && !padHeld.has(a)) { padHeld.add(a); press.add(a); I.usingPad = true; } else if (!b && padHeld.has(a)) { padHeld.delete(a); rel.add(a); } }
+      if (!I.pad) return;
+      if (!I.usingPad && padMoved(I.pad)) { I.usingPad = true; padBase = null; }
+      if (!I.usingPad) return;
+      for (const i in PAD) { const b = I.pad.buttons[i]?.pressed, a = PAD[i]; if (b && !padHeld.has(a)) { padHeld.add(a); press.add(a); I.usingPad = true; } else if (!b && padHeld.has(a)) { padHeld.delete(a); rel.add(a); } }
     },
     endFrame() { press.clear(); rel.clear(); const m = I.mouse; m.dx = m.dy = m.wheel = 0; m.leftPressed = m.rightPressed = false; },
   };
   const set = (code, on, rep) => { const as = MAP[code]; if (!as) return; for (const a of as) { if (on) { if (!rep) press.add(a); held.set(a, 1); } else { held.set(a, 0); rel.add(a); } } };
-  addEventListener('keydown', (e) => { if (typing()) { if (e.code === 'Escape') press.add('pause'); return; } I.usingPad = false; if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'F1', 'F3'].includes(e.code) || (e.ctrlKey && 'SDR'.includes(e.key.toUpperCase()))) e.preventDefault(); set(e.code, true, e.repeat); });
+  addEventListener('keydown', (e) => { if (typing()) { if (e.code === 'Escape') press.add('pause'); return; } if (I.usingPad) { I.usingPad = false; for (const a of padHeld) rel.add(a); padHeld.clear(); } if (['Tab', 'Space', 'ArrowUp', 'ArrowDown', 'F1', 'F3'].includes(e.code) || (e.ctrlKey && 'SDR'.includes(e.key.toUpperCase()))) e.preventDefault(); set(e.code, true, e.repeat); });
   addEventListener('keyup', (e) => set(e.code, false));
   addEventListener('blur', () => { held.clear(); I.mouse.left = I.mouse.right = false; });
   document.addEventListener('pointerlockchange', () => { I.captured = document.pointerLockElement === canvas; });
