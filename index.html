@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Storm Hunters</title>
+<meta name="description" content="Open-world co-op tornado chasing in your browser.">
+<meta name="theme-color" content="#0b0f13">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f13'/%3E%3Cpath d='M5 7h22M7 12h17M11 17h11M14 22h6M16 27h2' stroke='%23ff9a3c' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="./css/ui.css">
+<style>
+html,body{margin:0;height:100%;background:#06080a;overflow:hidden;color:#e8edf0;font-family:"Segoe UI",system-ui,sans-serif}
+#game{position:fixed;inset:0;width:100%;height:100%;display:block;outline:none}
+#ui{position:fixed;inset:0;pointer-events:none}
+#boot{position:fixed;inset:0;background:radial-gradient(120% 90% at 50% 110%,#2a3138 0%,#0c1014 55%,#06080a 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;z-index:100;transition:opacity .8s}
+#boot.done{opacity:0;pointer-events:none}
+#boot h1{font-weight:800;letter-spacing:.34em;font-size:clamp(26px,5vw,60px);margin:0 0 0 .34em}
+#boot .bar{width:min(420px,70vw);height:2px;background:#ffffff1c}#boot-bar{height:100%;width:0;background:#ff9a3c;transition:width .25s}
+#boot-msg{font-size:13px;letter-spacing:.14em;color:#93a1ab}
+</style>
+<script type="importmap">{"imports":{"three":"./vendor/three/three.module.min.js","three/addons/":"./vendor/three/addons/"}}</script>
+</head>
+<body>
+<canvas id="game" tabindex="0"></canvas>
+<div id="ui"></div>
+<div id="boot"><h1>STORM HUNTERS</h1><div class="bar"><div id="boot-bar"></div></div><div id="boot-msg">Starting</div></div>
+<script src="./vendor/peerjs/peerjs.min.js" defer></script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

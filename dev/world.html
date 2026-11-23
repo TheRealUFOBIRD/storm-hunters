@@ -1,0 +1,51 @@
+<!doctype html><html><head><meta charset="utf-8"><title>world dev</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#game{position:fixed;inset:0;width:100%;height:100%}#ui{position:fixed;left:4px;top:4px;color:#fff;font:12px monospace;text-shadow:0 0 3px #000;white-space:pre}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.module.min.js","three/addons/":"../vendor/three/addons/"}}</script></head>
+<body><canvas id="game"></canvas><div id="ui"></div>
+<script type="module">
+// ?at=City|lat,lon|x:..,z:..  &cam=ground|aerial|high|road|map|mapcanvas  &hour=  &gfx=1 (real renderer)  &yaw=deg &alt=m &off=m &wet= &fly=m/s &wind= &damage=ef
+import * as THREE from 'three';
+import { createContext, loadSystems, stepFrame } from '../src/core/context.js';
+import { toWorld } from '../src/core/geo.js';
+const q = new URLSearchParams(location.search), ctx = window.ctx = createContext(document.getElementById('game')), ui = document.getElementById('ui');
+const t0 = performance.now();
+if (!q.has('gfx')) {
+  const r = new THREE.WebGLRenderer({ canvas: ctx.canvas, antialias: true, powerPreference: 'high-performance', reversedDepthBuffer: true });
+  r.setSize(innerWidth, innerHeight, false); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = +(q.get('exp') || 1.0); r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap; ctx.renderer = r; r.info.autoReset = false;
+  const sun = new THREE.DirectionalLight(0xfff0dc, 3.4); sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); const c = sun.shadow.camera, sr = +(q.get('sr') || 90); c.left = c.bottom = -sr; c.right = c.top = sr; c.near = 10; c.far = 900; sun.shadow.bias = -.0004; sun.shadow.normalBias = .06;
+  const hemi = new THREE.HemisphereLight(0xbfd4ee, 0x6a6250, 1.35); ctx.scene.add(sun, sun.target, hemi);
+  const hour = +(q.get('hour') || 16.5), a = (hour - 6) / 12 * Math.PI, dir = new THREE.Vector3(-Math.cos(a) * -1, Math.max(.07, Math.sin(a)), .4); dir.x = Math.cos(a); dir.normalize(); ctx.globals.uSunDir.value.copy(dir); const night = Math.sin(a) < .02; if (night) { sun.intensity = .15; hemi.intensity = .12; }
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(50000, 32, 24), new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, depthTest: false, uniforms: { uS: { value: dir }, uN: { value: night ? .02 : 1 } }, vertexShader: 'varying vec3 d;void main(){d=position;gl_Position=projectionMatrix*mat4(mat3(viewMatrix))*vec4(position,1.);}', fragmentShader: 'varying vec3 d;uniform vec3 uS;uniform float uN;void main(){vec3 n=normalize(d);float h=max(n.y,0.);vec3 c=mix(vec3(.62,.70,.78),vec3(.12,.27,.55),pow(h,.45));c+=vec3(1.,.8,.5)*pow(max(dot(n,uS),0.),8.)*.25;c+=vec3(6.)*smoothstep(.9996,.9998,dot(n,uS));gl_FragColor=vec4(c*uN,1.);\n#include <tonemapping_fragment>\n#include <colorspace_fragment>\n}' })); sky.renderOrder = -10; sky.frustumCulled = false; ctx.scene.add(sky);
+  // cheap haze so distance reads
+  const envS = new THREE.Scene(); envS.add(sky.clone()); const pm = new THREE.PMREMGenerator(r); ctx.scene.environment = pm.fromScene(envS, 0, .1, 60000).texture; ctx.scene.environmentIntensity = .55; hemi.intensity *= .5;
+  ctx._gfx = { mock: true, sun, render() { r.info.reset(); const p = ctx.camera.position, fx = new THREE.Vector3(); ctx.camera.getWorldDirection(fx); const cx = Math.round((p.x + fx.x * sr * .7) / 4) * 4, cz = Math.round((p.z + fx.z * sr * .7) / 4) * 4; sun.target.position.set(cx, p.y - 2, cz); sun.position.copy(sun.target.position).addScaledVector(dir, 420); sun.target.updateMatrixWorld(); if (q.get('sh') === '0') sun.castShadow = false; ctx.scene.updateMatrixWorld(); r.render(ctx.scene, ctx.camera); r.autoClear = false; r.render(ctx.fxScene, ctx.camera); r.autoClear = true; }, resize() {} };
+  ctx.gfx = ctx._gfx;
+}
+await loadSystems(ctx, q.has('gfx') ? ['gfx', 'world'] : ['world']);
+if (!ctx.gfx?.render) ctx.gfx = ctx._gfx;
+ctx.storms.tornadoes.length = 0;
+console.log('create ms', Math.round(performance.now() - t0), ctx.quality.id);
+let X = 0, Z = 0, H = 0; const W = ctx.world, at = q.get('at') || 'spawn';
+const city = W.cities.find((c) => c.name === at);
+if (at === 'spawn' && W.spawnPoint) { const s = W.spawnPoint(); X = s.x; Z = s.z; H = s.heading; } else if (city) { X = city.x; Z = city.z; } else if (at.startsWith('x:')) { const m = at.match(/x:([-\d.]+),z:([-\d.]+)/); X = +m[1]; Z = +m[2]; } else if (at.includes(',')) { const [a, b] = at.split(',').map(Number), p = toWorld(a, b); X = p.x; Z = p.z; }
+X += +(q.get('dx') || 0); Z += +(q.get('dz') || 0);
+const cam = q.get('cam') || 'ground'; if (cam === 'road' && W.roads) { const n = W.roads.nearest(X, Z, q.has('kind') ? +q.get('kind') : 1); X = n.x - n.dirZ * 2; Z = n.z + n.dirX * 2; H = Math.atan2(n.dirX, -n.dirZ); }
+if (q.has('yaw')) H = (cam === 'road' || at === 'spawn' ? H : 0) + +q.get('yaw') * Math.PI / 180;
+const alt = +(q.get('alt') || { ground: 1.8, road: 1.55, aerial: 220, high: 2600, map: 30000 }[cam] || 2), pitch = +(q.get('pitch') || { ground: -2, road: -2.5, aerial: -22, high: -38, map: -89 }[cam] || 0) * Math.PI / 180, off = +(q.get('off') || 0);
+if (q.has('wet')) { ctx.globals.uWetness.value = +q.get('wet'); ctx.globals.uRain.value = +q.get('wet') > .5 ? .7 : 0; }
+if (q.has('hour')) ctx.time.hour = +q.get('hour');
+if (q.has('wind')) ctx.globals.uWind.value.set(+q.get('wind'), +q.get('wind') * .4);
+X += Math.cos(H) * off; Z += Math.sin(H) * off;
+const fly = +(q.get('fly') || 0); let fx = 0, worst = 0, acc = 0, nF = 0, wu = 0, wuMax = 0;
+const place = () => { const x = X + Math.sin(H) * fx, z = Z - Math.cos(H) * fx; ctx.camera.position.set(x, W.heightAt(x, z) + alt, z); ctx.camera.rotation.set(pitch, -H, 0, 'YXZ'); };
+if (q.has('fov')) ctx.camera.fov = +q.get('fov'); ctx.camera.aspect = innerWidth / innerHeight; ctx.camera.updateProjectionMatrix(); place();
+if (cam === 'mapcanvas') { const c = W.getMapCanvas(); c.style.cssText = 'position:fixed;inset:0;width:100%;height:auto;z-index:5'; document.body.appendChild(c); }
+if (q.has('ef')) { const ef = +q.get('ef'), t = { id: 5, x: X + Math.sin(H) * 160, z: Z - Math.cos(H) * 160 - 400, vx: 0, vz: 12, rCore: 45, vmax: [34, 45, 56, 68, 82, 98][ef], ef, stage: 'mature', strength: .8, spin: 1 }; ctx.storms.tornadoes.push(t); window.onStep = (dt) => { if (t.z < Z + 500) { t.z += 40 * dt; t.x += Math.sin(t.z / 90) * .4; } else ctx.storms.tornadoes.length = 0; }; }
+if (W.prewarm) await W.prewarm(X, Z); ctx.state = 'playing';
+console.log('prewarm done ms', Math.round(performance.now() - t0));
+const upd = W.update.bind(W); W.update = (dt) => { const a = performance.now(); upd(dt); const d = performance.now() - a; wu += d; wuMax = Math.max(wuMax, d); };
+let last = performance.now(); window.resetStat = () => { acc = 0; nF = 0; wu = 0; worst = 0; wuMax = 0; };
+window.stat = () => ({ fps: +(1000 / (acc / nF)).toFixed(1), worst: +worst.toFixed(1), worldMs: +(wu / nF).toFixed(2), worldMax: +wuMax.toFixed(1), calls: ctx.renderer.info.render.calls, tris: ctx.renderer.info.render.triangles, mem: ctx.renderer.info.memory, w: W.stats?.(), pos: [X + Math.sin(H) * fx, Z - Math.cos(H) * fx].map(Math.round) });
+(function loop(t) { const dt = Math.max(.001, (t - last) / 1000) || .016; last = t; if (fly) fx += fly * Math.min(dt, .1); place(); nF++; acc += dt * 1000; if (nF > 3) worst = Math.max(worst, dt * 1000); stepFrame(ctx, dt); if (window.onStep) window.onStep(dt); if (q.has('hud')) ui.textContent = JSON.stringify(window.stat()); requestAnimationFrame(loop); })(last);
+window.ready = true;
+</script></body></html>

@@ -1,0 +1,83 @@
+<!doctype html><html><head><meta charset="utf-8"><title>render dev</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#game{position:fixed;inset:0;width:100%;height:100%}#ui{position:fixed;inset:0;pointer-events:none}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.module.min.js","three/addons/":"../vendor/three/addons/"}}</script></head>
+<body><canvas id="game"></canvas><div id="ui"></div>
+<script type="module">
+// Render harness.  ?scene=cone|rope|wedge|stove|multi|night|close|inside|shelf|clear|sunset|far|meso  &hour= &orbit=1 &sim=1 (real storms) &t=
+import * as THREE from 'three';
+import { createContext, loadSystems, stepFrame } from '../src/core/context.js';
+import { fbm } from '../src/core/noise.js';
+const Q = new URLSearchParams(location.search), scn = Q.get('scene') || 'cone', num = (k, d) => (Q.has(k) ? +Q.get(k) : d);
+const ctx = window.ctx = createContext(document.getElementById('game'));
+const t0 = performance.now();
+await loadSystems(ctx, Q.has('sim') ? ['gfx', 'storms'] : ['gfx']);
+console.log('load ms', Math.round(performance.now() - t0), 'compile', Math.round(ctx.gfx.stats.compileMs || 0), 'reversed', ctx.gfx.stats.reversed);
+ctx.time.now = num('t', 300); ctx.time.hour = num('hour', { night: 22, sunset: 19.0, clear: 16.5, shelf: 18.2 }[scn] ?? 18.0);
+const W = ctx.world, scene = ctx.scene;
+
+// ---- stage ----
+const H = (x, z) => W.heightAt(x, z);
+function terrain(size, seg, hole) {
+  const g = new THREE.PlaneGeometry(size, size, seg, seg).rotateX(-Math.PI / 2), p = g.attributes.position, c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); p.setY(i, H(x, z) - (hole && Math.max(Math.abs(x), Math.abs(z)) < hole ? 25 : 0)); const n = fbm(x / 420, z / 420, 3, 3), f = (Math.floor(x / 800) * 7 + Math.floor(z / 800) * 13) % 5, m = fbm(x / 40, z / 40, 3, 9); const k = 0.8 + 0.35 * n + 0.25 * m; const C = [[0.10, 0.125, 0.045], [0.15, 0.135, 0.06], [0.085, 0.115, 0.04], [0.20, 0.165, 0.085], [0.12, 0.13, 0.05]][Math.abs(f)]; c[i * 3] = C[0] * k; c[i * 3 + 1] = C[1] * k; c[i * 3 + 2] = C[2] * k; }
+  g.setAttribute('color', new THREE.BufferAttribute(c, 3)); g.computeVertexNormals();
+  const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })); m.receiveShadow = true; scene.add(m);
+}
+terrain(1600, 256); terrain(60000, 300, 760);
+{ const g = new THREE.PlaneGeometry(8, 1500, 1, 200).rotateX(-Math.PI / 2), p = g.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, H(p.getX(i), p.getZ(i)) + 0.12); const r = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x3a3a3c, roughness: 0.55, polygonOffset: true, polygonOffsetFactor: 1 })); r.receiveShadow = true; scene.add(r); }
+const add = (g, m, x, y, z) => { const o = new THREE.Mesh(g, m); o.position.set(x, H(x, z) + y, z); o.castShadow = o.receiveShadow = true; scene.add(o); return o; };
+const R = ctx.rng(5), wood = new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 0.9 }), leaf = new THREE.MeshStandardMaterial({ color: 0x26381a, roughness: 0.9 }), wht = new THREE.MeshStandardMaterial({ color: 0xb8b2a6, roughness: 0.8 }), car = new THREE.MeshPhysicalMaterial({ color: 0x8a1a14, roughness: 0.35, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.08 }), chrome = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.08, metalness: 1 });
+for (let i = 0; i < 160; i++) { const x = R.range(-700, 700), z = R.range(-700, 400); if (Math.abs(x) < 14) continue; add(new THREE.CylinderGeometry(0.2, 0.35, 3, 6), wood, x, 1.5, z); for (let k = 0; k < 4; k++) add(new THREE.IcosahedronGeometry(R.range(1.2, 2.4), 1), leaf, x + R.range(-1.4, 1.4), 3.4 + k * 0.9, z + R.range(-1.4, 1.4)); }
+for (let z = -700; z < 100; z += 40) { add(new THREE.CylinderGeometry(0.14, 0.18, 9, 6), wood, 8.5, 4.5, z); add(new THREE.BoxGeometry(2.4, 0.14, 0.14), wood, 8.5, 8.4, z); }
+add(new THREE.BoxGeometry(9, 4, 14), wht, -34, 2, -60); add(new THREE.ConeGeometry(8.5, 3.4, 4).rotateY(Math.PI / 4), wood, -34, 5.7, -60); add(new THREE.CylinderGeometry(3, 3, 12, 20), chrome, -50, 6, -70);
+add(new THREE.BoxGeometry(1.9, 0.75, 4.4), car, 2, 0.75, -14); add(new THREE.BoxGeometry(1.7, 0.6, 2.2), chrome, 2, 1.4, -13.8); add(new THREE.SphereGeometry(0.8, 32, 24), chrome, -3, 0.9, -9); add(new THREE.SphereGeometry(0.8, 32, 24), wht, -5.2, 0.9, -10);
+
+// ---- storms ----
+const mkStorm = (o = {}) => { const s = { id: 1, type: 'supercell', seed: 12, x: 0, z: -4200, vx: 9, vz: -5, heading: 1.2, age: 900, life: 5400, intensity: 1, radius: 5200, rainR: 2400, cloudBase: 900, cloudTop: 11800, rotation: 0.95, hail: 3, warned: true, name: 'T', ...o }; s.meso = o.meso || { x: s.x - 300, z: s.z + 1200, r: 1150 }; s.rain = o.rain || { x: s.x + 2600, z: s.z - 2300, r: 2300, rate: 0.9 }; return s; };
+const mkT = (s, o = {}) => ({ id: 1, storm: s, seed: 3, x: s.meso.x, z: s.meso.z, y0: 0, vx: 8, vz: -3, age: 200, stage: 'mature', strength: 0.8, ef: 3, vmax: 75, rCore: 70, dp: 70, lcl: s.cloudBase, condense: 1, rTop: 300, dustR: 220, dust: 0.9, dustColor: [0.40, 0.29, 0.20], spin: 1, sub: [], lean: { x: 150, z: -60 }, wobbleSeed: 1, shape: 1.6, r0: 0.5, snake: 0.1, ...o });
+const funnelRadius = (t, h) => { const k = Math.min(1, h / t.lcl); const hc = t.lcl * (1 - t.condense); if (h < hc) return 0; const kk = (h - hc) / (t.lcl - hc + 1), b = t.rCore * t.r0; const tip = t.condense < 1 ? Math.min(1, Math.sqrt(kk * 2.2)) : 1; return tip * (b + (t.rTop - b) * Math.pow(k, t.shape)); };
+const axisAt = (t, h, o) => { const k = h / t.lcl, sw = Math.sin(ctx.time.now * 0.23 + k * 5) * t.snake, sc = Math.cos(ctx.time.now * 0.17 + k * 6.3) * t.snake; o.x = t.x + t.lean.x * (k * k * 0.7 + k * 0.3) + sw * 260 * k * (1.3 - k * 0.5); o.z = t.z + t.lean.z * (k * k * 0.7 + k * 0.3) + sc * 220 * k; return o; };
+let storms = [], tors = [], cam = { x: 3, z: 0, h: 2.2 }, look = null, dark = 0.6, rainW = 0;
+const S0 = mkStorm();
+const place = (s, t, d, az = 0) => { const x = Math.sin(az) * d, z = -Math.cos(az) * d, dx = x - t.x, dz = z - t.z; t.x += dx; t.z += dz; s.x += dx; s.z += dz; s.meso.x += dx; s.meso.z += dz; s.rain.x += dx; s.rain.z += dz; t.y0 = H(t.x, t.z); };
+const PRE = {
+  cone: () => { const t = mkT(S0); place(S0, t, 1700, -0.25); tors = [t]; storms = [S0]; look = [t.x, 330, t.z]; },
+  rope: () => { const t = mkT(S0, { rCore: 14, rTop: 70, r0: 0.75, shape: 2.4, strength: 0.35, vmax: 45, dustR: 55, dust: 0.6, lean: { x: 420, z: 160 }, snake: 0.34, stage: 'rope', ef: 1 }); place(S0, t, 1300, -0.3); tors = [t]; storms = [S0]; look = [t.x + 120, 330, t.z]; },
+  wedge: () => { const s = mkStorm({ cloudBase: 720, hail: 5 }); const t = mkT(s, { rCore: 420, rTop: 760, r0: 0.95, shape: 1.3, strength: 1, vmax: 98, ef: 5, dustR: 820, dust: 1, lean: { x: 60, z: 40 }, snake: 0.05 }); place(s, t, 3000, -0.3); tors = [t]; storms = [s]; look = [t.x, 300, t.z]; dark = 0.8; },
+  stove: () => { const t = mkT(S0, { rCore: 120, rTop: 210, r0: 0.95, shape: 2.2, strength: 0.9, vmax: 88, ef: 4, dustR: 330, dust: 1, lean: { x: 60, z: -30 }, snake: 0.12 }); place(S0, t, 1900, -0.2); tors = [t]; storms = [S0]; look = [t.x, 340, t.z]; },
+  multi: () => { const t = mkT(S0, { rCore: 260, rTop: 420, r0: 0.9, shape: 1.8, condense: 0.45, strength: 0.85, vmax: 85, ef: 4, dustR: 480, dust: 0.8, sub: [0, 1, 2].map((i) => ({ a: i * 2.1, r: 210, s: 1, rc: 34 })) }); t.sub._w = 1; place(S0, t, 1900, -0.2); tors = [t]; storms = [S0]; look = [t.x, 300, t.z]; },
+  night: () => { PRE.stove(); dark = 0.9; setInterval(() => { const m = tors[0]; ctx.events.emit('lightning', { x: m.x + (Math.random() - 0.3) * 2500, y: 1500 + Math.random() * 1800, z: m.z - 1200 - Math.random() * 1500, tx: 0, ty: 0, tz: 0, energy: 1.2, kind: 'ic' }); }, num('flash', 900)); },
+  close: () => { const t = mkT(S0, { rCore: 130, rTop: 260, r0: 0.95, shape: 1.8, strength: 1, vmax: 92, ef: 4, dustR: 300, dust: 0.8, lean: { x: 40, z: -30 }, snake: 0.08 }); place(S0, t, num('d', 330), -0.1); tors = [t]; storms = [S0]; look = [t.x, 130, t.z]; dark = 0.85; },
+  inside: () => { PRE.close(); place(S0, tors[0], num('d', 60), 0); look = [60, 120, -40]; },
+  shelf: () => { const s = mkStorm({ type: 'squall', x: 0, z: -num('d', 3600), vx: 0.5, vz: 14, radius: 7000, cloudBase: 800, rotation: 0.1, hail: 1 }); s.rain = { x: s.x, z: s.z - 2500, r: 5000, rate: 0.9 }; s.meso = { x: s.x, z: s.z, r: 900 }; storms = [s]; tors = []; look = [-600, 420, -2600]; },
+  clear: () => { storms = []; tors = []; look = [-500, 380, -1500]; dark = 0; },
+  sunset: () => { PRE.cone(); place(S0, tors[0], 2600, -1.2); look = [tors[0].x, 420, tors[0].z]; },
+  far: () => { const t = mkT(S0, { rCore: 110, rTop: 320 }); place(S0, t, num('d', 9500), -0.25); tors = [t]; storms = [S0]; look = [t.x, 2600, t.z]; dark = 0.1; },
+  meso: () => { const t = mkT(S0); place(S0, t, 2600, -0.25); tors = []; storms = [S0]; look = [S0.meso.x, 900, S0.meso.z]; },
+  under: () => { const t = mkT(S0); place(S0, t, 1100, -0.25); tors = []; storms = [S0]; look = [S0.meso.x, 1500, S0.meso.z]; },
+  tower: () => { const t = mkT(S0); place(S0, t, num('d', 16000), -0.25); tors = []; storms = [S0]; look = [S0.meso.x, 6500, S0.meso.z]; dark = 0; },
+  rain: () => { const t = mkT(S0); place(S0, t, 3000, -0.5); cam.x = S0.rain.x; storms = [S0]; tors = [t]; const dx = S0.rain.x; void dx; look = [S0.meso.x, 300, S0.meso.z]; rainW = 0.8; dark = 0.9; },
+};
+if (!Q.has('sim')) {
+  (PRE[scn] || PRE.cone)();
+  if (Q.has('az')) { const a = num('az', 0) * Math.PI / 180, d = Math.hypot(tors[0]?.x ?? S0.x, tors[0]?.z ?? S0.z); if (tors[0]) { place(storms[0], tors[0], num('d', d), a); look = [tors[0].x, look[1], tors[0].z]; } }
+  const M = ctx.storms; M.list = storms; M.tornadoes = tors; M.axisAt = axisAt; M.funnelRadius = funnelRadius;
+  M.weatherAt = (x, z, o = {}) => Object.assign(o, { rain: rainW, hail: 0, cloud: scn === 'clear' ? 0.45 : 0.7, dark, temp: 24, dewpoint: 20, visibility: 20000, windSpeed: 9, gust: 12, storm: null });
+  M.update = (dt) => { for (const t of tors) for (const s of t.sub) if (s.a !== undefined) s.a -= dt * 0.42; };
+  if (tors.length) tors[0].y0 = H(tors[0].x, tors[0].z);
+} else { const E = num('ef', 4), d = num('d', 1800); ctx.storms.clear?.(); ctx.storms.spawnAt(-400, -d, { ef: E, stage: Q.get('stage') || 'mature', type: Q.get('type') || 'supercell' }); const t = ctx.storms.tornadoes[0]; look = t ? [t.x, 320, t.z] : [-400, 400, -d]; }
+await ctx.world.ready; ctx.state = 'playing';
+const C = ctx.camera; if (Q.has('fov')) { C.fov = num('fov', 72); C.updateProjectionMatrix(); }
+cam.h = num('h', cam.h); const baseY = H(cam.x, cam.z) + cam.h; let orb = 0;
+const setCam = () => { const o = Q.has('orbit') ? orb * num('orbit', 1) : 0; C.position.set(cam.x + Math.sin(o * 0.3) * 8, baseY + Math.sin(o * 0.7) * 0.3, cam.z + Math.cos(o * 0.3) * 8 - 8); C.lookAt(look[0] + (num('lx', 0)), num('ly', look[1]), look[2]); if (Q.has('orbit')) C.rotateY(Math.sin(o * 0.5) * 0.12); };
+ctx.player.update = (dt) => { orb += dt; setCam(); };
+addEventListener('resize', () => { C.aspect = innerWidth / innerHeight; C.updateProjectionMatrix(); ctx.gfx.resize(); });
+let last = performance.now(), n = 0;
+(function loop(t) { const dt = Math.max(.001, (t - last) / 1000) || .016; last = t; stepFrame(ctx, dt); n++; requestAnimationFrame(loop); })(last);
+if (Q.has('dbgsteps')) ctx.gfx.vol.u.uClip.value.x = 1;
+window.ready = true;
+window.dbg = () => { const r = ctx.renderer, g = ctx.gfx, out = {}; const rd = (n, t, x, y, i = 0) => { const b = t.texture.type === 1015 ? new Float32Array(4) : t.texture.type === 1009 ? new Uint8Array(4) : new Uint16Array(4); const f = (v) => t.texture.type === 1016 ? +THREE.DataUtils.fromHalfFloat(v).toFixed(4) : v; try { r.readRenderTargetPixels(t, x * t.width | 0, y * t.height | 0, 1, 1, b, undefined, i); out[n] = [...b].map(f); } catch (e) { out[n] = String(e); } };
+  rd('trans', g.atm.trans, .7, .1); rd('ms', g.atm.ms, .6, .1); rd('sky', g.atm.sky, .3, .6); rd('aerial', g.atm.aerialRT, .3, .3); rd('map0', g.stormMap.rt, .5, .5, 0); rd('map1', g.stormMap.rt, .5, .5, 1); rd('cs', g.stormMap.cs[0], .5, .5); rd('vol', g.vol.out, .5, .7, 0); rd('volD', g.vol.out, .5, .7, 1); rd('comp', g.post.comp, .5, .7); rd('compg', g.post.comp, .5, .1); rd('hist', g.post.hist0, .5, .7); rd('hdr', g.post.hdr, .5, .7); rd('exp', g.post.exp[0], .5, .5); rd('mip4', g.post.mips[4], .5, .5); rd('ldr', g.post.ldr, .5, .7); rd('env', g.post.env, .3, .6); out.lightE = g.atm.lightE; out.gr = g.shared.groundRad.value; out.ud = g.shared.depthK.value; return out; };
+// GPU cost: N synchronous frames, forced to finish with a readback
+window.perf = (N = 30) => { const g = ctx.renderer.getContext(), px = new Uint8Array(4); const sync = () => { ctx.renderer.setRenderTarget(null); g.readPixels(0, 0, 1, 1, g.RGBA, g.UNSIGNED_BYTE, px); }; stepFrame(ctx, 0.016); sync(); const a = performance.now(); for (let i = 0; i < N; i++) { stepFrame(ctx, 0.016); } sync(); return { ms: +((performance.now() - a) / N).toFixed(2), ...ctx.gfx.stats, res: [ctx.gfx.stats.width, ctx.gfx.stats.height, ctx.gfx.vol.w, ctx.gfx.vol.h] }; };
+</script></body></html>

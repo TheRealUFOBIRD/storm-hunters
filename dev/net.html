@@ -1,0 +1,33 @@
+<!doctype html><html><head><meta charset="utf-8"><title>net dev</title>
+<style>html,body{margin:0;background:#0b0f13;color:#dfe6ea;font:13px/1.5 "Segoe UI",system-ui,sans-serif}#game{display:none}main{display:grid;grid-template-columns:420px 1fr;gap:16px;padding:16px}pre{white-space:pre-wrap;background:#10161b;padding:10px;margin:0;min-height:300px}button,input{font:inherit;padding:5px 9px}canvas{background:#10161b;width:100%}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.module.min.js","three/addons/":"../vendor/three/addons/"}}</script></head>
+<body><canvas id="game"></canvas><main><div><p><input id="nm" placeholder="name"> <button id="h">Host</button> <input id="c" size="6" placeholder="code"> <button id="j">Join</button> <button id="l">Leave</button> <button id="ch">Chat</button></p><pre id="log"></pre></div><canvas id="map" width="900" height="620"></canvas></main>
+<script src="../vendor/peerjs/peerjs.min.js"></script>
+<script type="module">
+// ?net=loopback for BroadcastChannel (two tabs). Cars drive in circles; arrows show interpolated remote players.
+import * as THREE from 'three';
+import { createContext, loadSystems, stepFrame } from '../src/core/context.js';
+const $ = (i) => document.getElementById(i), ctx = window.ctx = createContext($('game'));
+await loadSystems(ctx, ['net']); ctx.state = 'playing';
+const log = (s) => { $('log').textContent = (s + '\n' + $('log').textContent).slice(0, 4000); console.log('[net-dev] ' + s); };
+const q = new URLSearchParams(location.search), R = 30 + Math.random() * 30, w = 0.35 + Math.random() * 0.3;
+const v = { id: 1, type: 'scout', pos: new THREE.Vector3(), vel: new THREE.Vector3(), quat: new THREE.Quaternion(), wheels: [], rpm: 2500, throttle: 0.6, headlights: true, gear: 2, brake: 0 };
+ctx.vehicles.list.push(v); ctx.vehicles.serializeState = (x, o) => { o.push(x.rpm); return o; }; ctx.player = { mode: 'drive', pos: v.pos, heading: 0, vehicle: v, update() {} };
+ctx.gameplay.serializeShared = () => ({ n: Math.floor(ctx.time.now / 5) }); ctx.gameplay.applyShared = (d) => { ctx.shared = d; }; ctx.world.applyBroken = (i) => { ctx.broken = i; }; let snaps = 0; ctx.storms.applySnapshot = () => { snaps++; };
+for (const e of ['net:status', 'net:peer-join', 'net:peer-leave', 'net:tool', 'chat', 'net:ended']) ctx.events.on(e, (d) => log(e + ' ' + JSON.stringify(d, (k, x) => (k === 'peer' ? undefined : x))));
+$('h').onclick = () => ctx.net.host($('nm').value || 'Host').then((c) => { $('c').value = c; log('hosting ' + c); }, (e) => log('ERR ' + e.message));
+$('j').onclick = () => ctx.net.join($('c').value, $('nm').value || 'Guest').then(() => log('joined'), (e) => log('ERR ' + e.message));
+$('l').onclick = () => ctx.net.leave(); $('ch').onclick = () => ctx.net.chat('hello from ' + ctx.net.self.name);
+window.report = () => ({ role: ctx.net.role, room: ctx.net.room, peers: [...ctx.net.peers.values()].map((p) => ({ n: p.name, ping: p.ping, x: +p.pos.x.toFixed(1), z: +p.pos.z.toFixed(1), type: p.vehicleType, mode: p.mode, stale: +(p.stale || 0).toFixed(3) })), now: +ctx.time.now.toFixed(3), rtt: +ctx.net.session.ts.rtt.toFixed(2), snaps, shared: ctx.shared, broken: ctx.broken, stats: ctx.net.stats, state: ctx.net.session.link?.stateOpen?.() ?? [...ctx.net.peers.values()].map((p) => p.conn?.link.stateOpen?.()) });
+const g = $('map').getContext('2d'); let last = performance.now();
+function loop(t) {
+  const dt = Math.max(0.001, (t - last) / 1000); last = t; const a = ctx.time.now * w; v.pos.set(Math.cos(a) * R, 0, Math.sin(a) * R); v.vel.set(-Math.sin(a) * R * w, 0, Math.cos(a) * R * w); v.quat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -a + Math.PI);
+  stepFrame(ctx, dt); g.clearRect(0, 0, 900, 620);
+  const dot = (p, c, n) => { g.fillStyle = c; g.beginPath(); g.arc(450 + p.x * 4, 310 + p.z * 4, 7, 0, 7); g.fill(); g.fillText(n, 460 + p.x * 4, 306 + p.z * 4); };
+  g.font = '14px system-ui'; dot(v.pos, ctx.net.self.color || '#fff', ctx.net.self.name + ' (me)'); for (const p of ctx.net.peers.values()) dot(p.pos, p.color, `${p.name} ${p.ping}ms`);
+  g.fillStyle = '#9ab'; g.fillText(`${ctx.net.role} ${ctx.net.room || ''}  t=${ctx.time.now.toFixed(2)}  hour=${ctx.time.hour.toFixed(2)}  in=${ctx.net.stats.in} out=${ctx.net.stats.out}`, 12, 20); requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+if (q.has('host')) $('h').click(); if (q.get('join')) { $('c').value = q.get('join'); $('j').click(); }
+window.ready = true;
+</script></body></html>

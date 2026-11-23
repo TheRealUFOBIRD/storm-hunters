@@ -1,0 +1,61 @@
+<!doctype html><html><head><meta charset="utf-8"><title>vehicle dev</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#game{position:fixed;inset:0;width:100%;height:100%}#ui{position:fixed;inset:0;pointer-events:none}#info{position:fixed;left:10px;top:8px;color:#fff;font:13px monospace;text-shadow:0 0 3px #000;white-space:pre}</style>
+<script type="importmap">{"imports":{"three":"../vendor/three/three.module.min.js","three/addons/":"../vendor/three/addons/"}}</script></head>
+<body><canvas id="game"></canvas><div id="ui"></div><div id="info"></div>
+<script type="module">
+// ?view=turntable&type=prairie&a=35&e=12&d=7&lod=0&color=aa2200&dirt=.2&damage=0&lights=0&night=0&rain=0&anchored=0&target=y
+// ?view=lineup | ?view=drive&type=&script=1&cam=chase|cockpit|hood&t=6&real=1 | ?view=cockpit&type= | ?view=foot | ?view=char
+import * as THREE from 'three';
+import { createContext, loadSystems, stepFrame } from '../src/core/context.js';
+const q = new URLSearchParams(location.search), N = (k, d) => (q.has(k) ? +q.get(k) : d), view = q.get('view') || 'turntable';
+const info = document.getElementById('info'), canvas = document.getElementById('game');
+function skyTex(night) {
+  const c = document.createElement('canvas'); c.width = 4096; c.height = 2048; const g = c.getContext('2d'); g.scale(4, 4); const s = g.createLinearGradient(0, 0, 0, 512);
+  const col = night ? ['#05070b', '#0a0f16', '#1b2430', '#0a0a09', '#050504'] : q.has('storm') ? ['#39424a', '#56616a', '#b9bdb4', '#4a4a35', '#24251b'] : ['#2f5d97', '#6f9cc9', '#dde3e4', '#6f6a55', '#3a3829'];
+  s.addColorStop(0, col[0]); s.addColorStop(0.3, col[1]); s.addColorStop(0.495, col[2]); s.addColorStop(0.505, col[3]); s.addColorStop(1, col[4]); g.fillStyle = s; g.fillRect(0, 0, 1024, 512);
+  if (!night) { let r = 7; const R = () => (r = (r * 16807) % 2147483647) / 2147483647; for (let i = 0; i < 260; i++) { const x = R() * 1024, y = 70 + R() * 170, w = 20 + R() * 120 * (0.3 + y / 250), h = 4 + R() * 16; const a = g.createRadialGradient(x, y, 0, x, y, w); a.addColorStop(0, `rgba(255,255,255,${0.1 + R() * 0.16})`); a.addColorStop(1, 'rgba(255,255,255,0)'); g.save(); g.translate(0, y); g.scale(1, h / w); g.translate(0, -y); g.fillStyle = a; g.fillRect(0, 0, 1024, 900); g.restore(); } g.fillStyle = '#2d3324'; for (let x = 0; x < 1024; x += 0.5) { const h = 1.2 + Math.abs(Math.sin(x * 0.07) * 1.6 + Math.sin(x * 0.31) * 1.2 + Math.sin(x * 1.7) * 0.5 + Math.sin(x * 5.3) * 0.4); g.fillRect(x, 256 - h, 0.6, h + 2); } const a = g.createRadialGradient(700, 130, 0, 700, 130, 110); a.addColorStop(0, 'rgba(255,255,245,1)'); a.addColorStop(0.12, 'rgba(255,250,235,.9)'); a.addColorStop(1, 'rgba(255,240,220,0)'); g.fillStyle = a; g.fillRect(500, 0, 400, 300); }
+  const t = new THREE.CanvasTexture(c); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace; return t;
+}
+function fallbackGfx(ctx) {
+  const night = N('night', 0), r = (ctx.renderer = new THREE.WebGLRenderer({ canvas, antialias: true })); r.setPixelRatio(1); r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.0; r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+  const t = skyTex(night), pm = new THREE.PMREMGenerator(r); ctx.scene.environment = pm.fromEquirectangular(t).texture; ctx.scene.background = t; ctx.scene.backgroundBlurriness = 0.02; ctx.scene.environmentIntensity = night ? 1 : 1.15; ctx.scene.backgroundIntensity = night ? 1 : 1.1;
+  const sun = new THREE.DirectionalLight(0xfff1dc, night ? 0.03 : q.has('storm') ? 0.5 : 3.6); sun.position.set(0.5, 0.75, 0.4).multiplyScalar(40); sun.castShadow = true; sun.shadow.mapSize.set(4096, 4096); Object.assign(sun.shadow.camera, { left: -14, right: 14, top: 14, bottom: -14, near: 1, far: 120 }); sun.shadow.bias = -0.0002; sun.shadow.normalBias = 0.012; ctx.scene.add(sun, sun.target); ctx.sunL = sun;
+  const size = () => { r.setSize(innerWidth, innerHeight, false); ctx.camera.aspect = innerWidth / innerHeight; ctx.camera.updateProjectionMatrix(); }; size(); addEventListener('resize', size);
+  return { render() { const p = ctx.player?.pos || new THREE.Vector3(); if (ctx.state === 'playing' && view !== 'turntable' && view !== 'lineup') { sun.target.position.copy(p); sun.position.copy(p).add(new THREE.Vector3(20, 30, 16)); } r.autoClear = true; r.render(ctx.scene, ctx.camera); r.autoClear = false; r.render(ctx.fxScene, ctx.camera); }, flash() {}, stats: {} };
+}
+const ctx = (window.ctx = createContext(canvas));
+const only = ['vehicles', 'player']; if (q.has('real')) only.push(...(q.get('real') === '1' ? ['gfx', 'world', 'storms', 'fx'] : q.get('real').split(',')));
+if (!only.includes('gfx')) ctx.gfx = fallbackGfx(ctx);
+await loadSystems(ctx, only); const real = ctx.gfx && !only.includes('gfx') ? null : ctx.gfx; if (!real && !ctx.gfx?.render) ctx.gfx = fallbackGfx(ctx);
+await ctx.world.ready; ctx.state = 'playing'; ctx.time.hour = N('hour', 17.2);
+if (ctx.world.mock) { // ground
+  if (view === 'turntable' || view === 'lineup') { const flat = () => 0; ctx.world.heightAt = flat; ctx.world.normalAt = (x, z, o) => o.set(0, 1, 0); }
+  const cv = document.createElement('canvas'); cv.width = cv.height = 512; const g = cv.getContext('2d'); g.fillStyle = '#4a4b4c'; g.fillRect(0, 0, 512, 512); for (let i = 0; i < 30000; i++) { const v = 50 + Math.random() * 60; g.fillStyle = `rgba(${v},${v},${v * 0.97},.35)`; g.fillRect(Math.random() * 512, Math.random() * 512, 2, 2); } const tx = new THREE.CanvasTexture(cv); tx.wrapS = tx.wrapT = THREE.RepeatWrapping; tx.repeat.set(400, 400); tx.colorSpace = THREE.SRGBColorSpace; tx.anisotropy = 8;
+  if (view === 'turntable' || view === 'lineup') { const m = new THREE.Mesh(new THREE.CircleGeometry(600, 64), new THREE.MeshStandardMaterial({ map: tx, color: N('night', 0) ? 0x888888 : 0xffffff, roughness: 0.92 - 0.5 * N('rain', 0) })); m.rotation.x = -Math.PI / 2; m.receiveShadow = true; ctx.scene.add(m); }
+  else { const n = 260, S = 1400, geo = new THREE.PlaneGeometry(S, S * 3, n, n * 3); geo.rotateX(-Math.PI / 2); const p = geo.attributes.position, col = []; for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); p.setY(i, ctx.world.heightAt(x, z)); const r = Math.abs(x) < 6; col.push(r ? 0.16 : 0.12, r ? 0.16 : 0.16, r ? 0.165 : 0.06); } geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); geo.computeVertexNormals(); const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 })); m.receiveShadow = true; ctx.scene.add(m); const line = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 3), new THREE.MeshStandardMaterial({ color: 0xd8b030, roughness: 0.8 })); for (let z = -1000; z < 1000; z += 9) { const l = line.clone(); l.rotation.x = -Math.PI / 2; l.position.set(0, ctx.world.heightAt(0, z) + 0.03, z); ctx.scene.add(l); } }
+}
+const { VehicleVisual, getModel } = await import('../src/vehicles/visual.js');
+let frame = () => {};
+if (view === 'turntable' || view === 'lineup') {
+  const types = view === 'lineup' ? Object.keys(ctx.vehicles.types) : [q.get('type') || 'prairie'], vs = [];
+  types.forEach((ty, i) => { const t0 = performance.now(), m = getModel(ty); console.log(ty, 'build ms', (performance.now() - t0).toFixed(0), 'tris', m.lods.map((l) => l.tris | 0).join('/'), 'paint', m.lods[0].paint.index.count / 3 | 0, 'trim', m.lods[0].trim.index.count / 3 | 0, 'wheel', m.lods[0].wheel.index.count / 3 | 0, 'glass', m.lods[0].glass.index.count / 3 | 0);
+    const v = new VehicleVisual(ty, { fxScene: ctx.fxScene, color: q.has('color') ? parseInt(q.get('color'), 16) : null }); v.object3d.position.set(view === 'lineup' ? (i - (types.length - 1) / 2) * 3.6 : 0, v.spec.cgY, view === 'lineup' ? 0 : -v.spec.cgF); ctx.scene.add(v.object3d); v.setLod(N('lod', 0)); v.setState({ steer: N('steer', 0), lights: !!N('lights', 0), brake: N('brake', 0), dirt: N('dirt', 0.12), wet: N('rain', 0), damage: N('damage', 0), anchored: !!N('anchored', 0) }); v.state.bar = N('bar', 0); v.state.beacon = N('beacon', 0); if (N('anchored', 0)) v.anchorK = 1;
+    if (N('damage', 0) > 0) { v.addDent(0.8, 0.1, -1.6, 0.1); v.addDent(-0.85, 0.15, 0.3, 0.08); v.addDent(0.2, 0.1, -2.1, 0.12); v.addCrack(0.25, 0.65, -0.5, 0.6); v.addCrack(-0.4, 0.6, -0.4, 0.4); v.addCrack(0.7, 0.6, 0.2, 0.35); } vs.push(v); });
+  let a = N('a', 35) * Math.PI / 180, e = N('e', 10) * Math.PI / 180, d = N('d', view === 'lineup' ? 18 : 7.2), ty = N('ty', 0.7), tz = N('tz', 0), tx = N('tx', 0); window.setView = (o) => { if (o.a !== undefined) a = o.a * Math.PI / 180; if (o.e !== undefined) e = o.e * Math.PI / 180; d = o.d ?? d; ty = o.ty ?? ty; tz = o.tz ?? tz; tx = o.tx ?? tx; }; ctx.camera.fov = N('fov', 32); ctx.camera.near = 0.05; ctx.camera.updateProjectionMatrix();
+  frame = (dt) => { const A = a + (q.has('spin') ? performance.now() * 0.0005 : 0); ctx.camera.position.set(tx + Math.sin(A) * Math.cos(e) * d, ty + Math.sin(e) * d, tz - Math.cos(A) * Math.cos(e) * d); ctx.camera.lookAt(tx, ty, tz); for (const v of vs) v.update(dt, { cam: ctx.camera.position, night: N('night', 0), rain: N('rain', 0), windX: N('wind', 0), windZ: 0, vel: new THREE.Vector3() }); };
+  ctx.vehicles.update = ctx.player.update = ctx.vehicles.lateUpdate = ctx.player.lateUpdate = () => {};
+} else if (view === 'char') {
+  const c = ctx.player.createCharacterVisual(q.has('color') ? parseInt(q.get('color'), 16) : 0xc8541a); ctx.scene.add(c.object3d); ctx.vehicles.update = ctx.player.update = ctx.player.lateUpdate = () => {}; const gy = ctx.world.heightAt(20, 0); c.object3d.position.set(20, gy, 0);
+  frame = (dt) => { c.setState({ speed: N('speed', 0), crouch: N('crouch', 0), aim: N('aim', 0) }); c.update?.(dt); const a = N('a', 35) * Math.PI / 180, d = N('d', 3.4); ctx.camera.fov = 32; ctx.camera.updateProjectionMatrix(); ctx.camera.position.set(20 + Math.sin(a) * d, gy + N('h', 1.3), -Math.cos(a) * d); ctx.camera.lookAt(20, gy + N('ty', 0.95), 0); };
+} else {
+  const x = N('x', 2), z = N('z', 0), type = q.get('type') || 'prairie'; const sp = ctx.world.mock ? { x, z, heading: 0 } : ctx.world.spawnPoint(q.get('city') || 'Wichita'); await ctx.world.prewarm?.(sp.x, sp.z);
+  ctx.player.teleport(sp.x, sp.z, sp.heading); const v = ctx.vehicles.spawn(type, sp.x, sp.z, sp.heading); ctx.player.enter(v); ctx.player.setCameraMode(q.get('cam') || (view === 'cockpit' ? 'cockpit' : 'chase')); if (N('lights', 0)) v.headlights = true;
+  if (ctx.storms.mock && !q.has('tornado')) { ctx.storms.windAt = (a, b, c, o) => o.set(N('wind', 4), 0, 0); ctx.storms.tornadoes.length = 0; }
+  if (view === 'foot') { setTimeout(() => { ctx.player.exit(); ctx.player.setCameraMode('foot'); }, 600); }
+  const S = q.get('script') || (view === 'drive' ? '1' : ''); let T = 0; frame = (dt) => { T += dt; const I = ctx.input; const set = (a, on) => { if (on !== !!I['_' + a]) { I['_' + a] = on; I.inject(a, on); } };
+    if (S === '1') { set('throttle', true); set('right', T > 4 && T < 5); set('left', T > 6 && T < 7); } if (S === '2') { set('throttle', T < 5); set('right', T > 4.5); set('handbrake', T > 5 && T < 6); } if (S === '3') set('brake', true); if (S === 'walk') set('forward', T > 1.2);
+    info.textContent = q.has('noinfo') ? '' : `${ctx.player.mode} ${ctx.player.cameraMode || ''} v ${(v.speed * 3.6).toFixed(0)} km/h rpm ${v.rpm | 0} g ${v.gear} dmg ${v.damage.toFixed(2)} windLoad ${v.windLoad.toFixed(2)} steer ${v.steer.toFixed(2)} slip ${v.wheels.map((w) => w.slip.toFixed(1)).join(' ')} up ${v.body?.upY.toFixed(2)} surf ${v.wheels.map((w) => w.surface[0]).join('')}`; };
+}
+let last = performance.now(); (function loop(t) { const dt = Math.max(0.001, (t - last) / 1000) || 0.016; last = t; frame(Math.min(dt, 0.1)); stepFrame(ctx, dt); requestAnimationFrame(loop); })(last);
+window.ready = true;
+</script></body></html>

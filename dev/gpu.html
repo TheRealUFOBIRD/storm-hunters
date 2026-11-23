@@ -1,0 +1,5 @@
+<!doctype html><meta charset=utf-8><body style="margin:0;background:#222"><script type=module>
+const c=document.createElement('canvas');const g=c.getContext('webgl2');const e=g&&g.getExtension('WEBGL_debug_renderer_info');
+console.log(g?[g.getParameter(g.RENDERER),!!g.getExtension('EXT_color_buffer_float'),!!g.getExtension('OES_texture_float_linear'),!!g.getExtension('EXT_float_blend'),g.getParameter(g.MAX_TEXTURE_SIZE)].join(' | '):'no gl');
+let n=0,t=performance.now();(function f(){n++;requestAnimationFrame(f)})();setTimeout(()=>console.log('raf fps',n/((performance.now()-t)/1000)),2000);
+</script>
