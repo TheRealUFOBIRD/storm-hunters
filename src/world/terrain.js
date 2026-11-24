@@ -20,7 +20,7 @@ export const TL = { ...L, mud: 13, red: 14, cliff: 15, desert: 16, count: 17 };
 const SCANS = [['grass', TL.grass], ['dry', TL.dry], ['dirt', TL.dirt], ['plowed', TL.plowed], ['gravel', TL.gravel], ['sand', TL.sand], ['rock', TL.rock], ['snow', TL.snow], ['forest', TL.forest], ['crop', TL.crop], ['mud', TL.mud], ['redsoil', TL.red], ['cliff', TL.cliff], ['desert', TL.desert]];
 const PROXY = { [TL.mud]: L.dirt, [TL.red]: L.dirt, [TL.cliff]: L.rock, [TL.desert]: L.sand }; // procedural stand-ins until the scan loads
 // per-scan albedo gain (linear) so scans with different exposure sit together
-const GAIN = { grass: 1.0, dry: .82, dirt: 1.1, plowed: 1.0, gravel: .9, sand: 1.05, rock: 1.05, snow: 1.12, forest: .62, crop: .95, mud: 1.0, redsoil: 1.0, cliff: .95, desert: 1.0 };
+const GAIN = { grass: 1.0, dry: .5, dirt: 1.1, plowed: 1.0, gravel: .9, sand: 1.05, rock: 1.05, snow: 1.12, forest: .62, crop: .95, mud: 1.0, redsoil: 1.0, cliff: .95, desert: 1.0 };
 const DBG = typeof location !== 'undefined' ? +(new URLSearchParams(location.search).get('tdbg') || 0) : 0;
 // per-scan roughness remap [min,max]: vegetation never reads glossy at grazing angles
 const ROUGH = { grass: [.8, 1], dry: [.82, 1], dirt: [.7, 1], plowed: [.75, 1], gravel: [.7, 1], sand: [.72, 1], rock: [.6, .95], snow: [.45, .8], forest: [.78, 1], crop: [.78, 1], mud: [.5, .95], redsoil: [.7, 1], cliff: [.62, .95], desert: [.72, 1] };

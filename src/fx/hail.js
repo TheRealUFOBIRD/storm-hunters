@@ -10,13 +10,15 @@ function stoneGeo(seed, detail = 1) {
 }
 export function createHail(ctx, soft, particles) {
   const q = Math.max(0.3, ctx.quality.particles), N = Math.round(320 * q), M = Math.round(2600 * q);
-  const mat = new THREE.MeshPhysicalMaterial({ color: 0xdfe8ee, roughness: 0.28, metalness: 0, transmission: 0, clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 1.15 }); mat.fog = false;
+  const mat = new THREE.MeshPhysicalMaterial({ color: 0xe4e8ea, roughness: 0.42, metalness: 0, transmission: 0, clearcoat: 0.2, clearcoatRoughness: 0.4, envMapIntensity: 0.8 }); mat.fog = false;
   const fall = new THREE.InstancedMesh(stoneGeo(1.3), mat, N); fall.frustumCulled = false; fall.castShadow = false; fall.receiveShadow = true; fall.instanceMatrix.setUsage(THREE.DynamicDrawUsage); fall.count = 0; ctx.scene.add(fall);
   const lie = new THREE.InstancedMesh(stoneGeo(2.1, 0), mat, M); lie.frustumCulled = false; lie.receiveShadow = true; lie.instanceMatrix.setUsage(THREE.DynamicDrawUsage); lie.count = 0; lie.visible = false; ctx.scene.add(lie);
   const layer = streakLayer(ctx, soft, { n: Math.round(1500 * q), box: [46, 24, 46], w: 0.007, alpha: 2.2, near: 7, fade: 6, shutter: 1 / 75, seed: 61, minPx: 0.7, solid: 1, tint: [0.95, 0.98, 1.02], curtain: 0.3, order: 19 });
   const S = []; for (let i = 0; i < N; i++) S.push({ on: false, x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, r: 0.01, b: 0, gy: 0, rx: Math.random() * 6, ry: Math.random() * 6, wx: 0, wy: 0, rest: 0 });
   const L = { born: new Float32Array(M).fill(-1e6), life: new Float32Array(M), x: new Float32Array(M), y: new Float32Array(M), z: new Float32Array(M), r: new Float32Array(M), n: 0, head: 0 };
-  const m4 = new THREE.Matrix4(), e = new THREE.Euler(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), Sc = new THREE.Vector3(); let acc = 0, lieAcc = 0, meltT = 0, now = 0, cm = 1; const vel = new THREE.Vector3(); let hitT = 0;
+  const m4 = new THREE.Matrix4(), e = new THREE.Euler(), Q = new THREE.Quaternion(), P = new THREE.Vector3(), Sc = new THREE.Vector3(); let acc = 0, lieAcc = 0, meltT = 0, now = 0, cm = 1; const vel = new THREE.Vector3(); let hitT = 0; const lastCam = new THREE.Vector3(1e9, 0, 0);
+  const clearLie = () => { L.life.fill(0); L.born.fill(-1e6); L.n = 0; L.head = 0; lie.count = 0; lie.visible = false; };
+  ctx.events?.on?.('game:started', clearLie); ctx.events?.on?.('player:respawn', clearLie);
   const settle = (x, y, z, r) => { const i = L.head; L.head = (L.head + 1) % M; L.n = Math.max(L.n, i + 1); L.born[i] = now; L.life[i] = 90 + Math.random() * 120; L.x[i] = x; L.y[i] = y; L.z[i] = z; L.r[i] = r; Q.setFromEuler(e.set(Math.random() * 6, Math.random() * 6, 0)); m4.compose(P.set(x, y, z), Q, Sc.setScalar(r)); lie.setMatrixAt(i, m4); lie.count = L.n; lie.visible = true; lie.instanceMatrix.needsUpdate = true; };
   return {
     update(dt, hail, hailCm, wind, camVel, cam, px) {
@@ -41,7 +43,11 @@ export function createHail(ctx, soft, particles) {
       fall.count = shown; fall.visible = shown > 0; if (shown) fall.instanceMatrix.needsUpdate = true;
       // ---- ground accumulation around the camera
       if (hail > 0.05 && w) { lieAcc += dt * hail * 34; while (lieAcc > 1) { lieAcc--; const a = Math.random() * 6.283, d = 3 + 30 * Math.sqrt(Math.random()), x = cam.x + Math.cos(a) * d + camVel.x * 1.5, z = cam.z + Math.sin(a) * d + camVel.z * 1.5, r = 0.005 * cm * (0.3 + 0.7 * Math.random()); settle(x, w.heightAt(x, z) + r * 0.6, z, Math.max(r, 0.004)); } }
-      if ((meltT -= dt) < 0 && L.n) { meltT = 0.5; let live = 0; const step = Math.ceil(L.n / 1); for (let i = 0; i < step; i++) { const a = now - L.born[i]; if (a < L.life[i]) { live++; if (a > L.life[i] * 0.6) { const k = 1 - (a / L.life[i] - 0.6) / 0.4; m4.makeScale(L.r[i] * k, L.r[i] * k, L.r[i] * k); m4.setPosition(L.x[i], L.y[i], L.z[i]); lie.setMatrixAt(i, m4); } } else if (L.life[i] > 0) { m4.makeScale(0, 0, 0); lie.setMatrixAt(i, m4); L.life[i] = 0; } } lie.instanceMatrix.needsUpdate = true; lie.visible = live > 0; }
+      // a long camera jump (menu -> game start, respawn, teleport) leaves old stones behind: drop them all
+      if (lastCam.distanceToSquared(cam) > 250 * 250) clearLie();
+      lastCam.copy(cam);
+      // melt, and hide stones beyond ~70 m: sub-pixel shiny ice only sparkles as blue-white speckle on distant fields
+      if ((meltT -= dt) < 0 && L.n) { meltT = 0.5; let live = 0; for (let i = 0; i < L.n; i++) { const a = now - L.born[i]; if (a < L.life[i]) { live++; const dx = L.x[i] - cam.x, dz = L.z[i] - cam.z, far = dx * dx + dz * dz > 70 * 70; const k = far ? 0 : a > L.life[i] * 0.6 ? 1 - (a / L.life[i] - 0.6) / 0.4 : 1; Q.setFromEuler(e.set(i * 1.7, i * 2.3, 0)); m4.compose(P.set(L.x[i], L.y[i], L.z[i]), Q, Sc.setScalar(L.r[i] * k)); lie.setMatrixAt(i, m4); } else if (L.life[i] > 0) { m4.makeScale(0, 0, 0); lie.setMatrixAt(i, m4); L.life[i] = 0; } } lie.instanceMatrix.needsUpdate = true; lie.visible = live > 0; }
       // ---- big hail hurts
       if (hail > 0.15 && cm > 2 && (hitT -= dt) < 0) { hitT = 0.12 + Math.random() * 0.5 / hail; const p = ctx.player?.pos; if (p) ctx.events.emit('fx:hail-hit', { speed: vt, mass: 480 * Math.PI * Math.pow(cm * 0.01, 3), cm, pos: p }); }
     },

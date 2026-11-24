@@ -16,7 +16,7 @@ const BEND = /* glsl */`
   float sp=length(w); fl=clamp(sp/30.,0.,.95); vec2 dir=sp>.01?w/sp:vec2(1.,0.);
   float bend=(.15+.35*th)*clamp(sp/12.,.05,1.4)+.08; float sway=sin(uTime*(1.6+sp*.15)+wb.x*.3+wb.z*.2+th*6.)*.12*clamp(sp/6.,.2,1.);
   vec2 off=dir*(bend+sway)*t*t*hgt*(1.+fl); float yy=t*hgt*(1.-fl*.75*t);`;
-const FRAG = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCol; varying float vT;').replace('#include <map_fragment>', 'diffuseColor.rgb=vCol*(.45+.75*vT);').replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal=normalize(mat3(viewMatrix)*vec3(0.,1.,0.)); nonPerturbedNormal=normal;'); };
+const FRAG = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCol; varying float vT;').replace('#include <map_fragment>', 'diffuseColor.rgb=vCol*(.45+.75*vT);').replace('#include <roughnessmap_fragment>', 'float roughnessFactor=1.;').replace('#include <metalnessmap_fragment>', 'float metalnessFactor=0.;').replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal=normalize(mat3(viewMatrix)*vec3(0.,1.,0.)); nonPerturbedNormal=normal;'); };
 
 export function createGrass(ctx, S) {
   const q = ctx.quality.grass ?? .5; if (q <= 0) return { update() {}, group: new THREE.Group(), idle: () => true };
@@ -30,7 +30,7 @@ export function createGrass(ctx, S) {
   const bp = [], bi = [], bs = [];
   for (let b = 0; b < 5; b++) { const a = b * 2.4 + .3, ox = Math.cos(a * 1.7) * .09 * b, oz = Math.sin(a * 1.3) * .09 * b, ca = Math.cos(a), sa = Math.sin(a), o = bp.length / 3; for (let k = 0; k <= 4; k++) { const t = k / 4, w = .022 * (1 - t * .85); for (const sg of [-1, 1]) { bp.push(ox + ca * w * sg, t, oz + sa * w * sg); bs.push(t, b / 5); } } for (let k = 0; k < 4; k++) { const a0 = o + k * 2; bi.push(a0, a0 + 1, a0 + 3, a0, a0 + 3, a0 + 2); } }
   const base = new THREE.BufferGeometry(); base.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3)); base.setAttribute('normal', new THREE.Float32BufferAttribute(bp.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3)); base.setAttribute('aS', new THREE.Float32BufferAttribute(bs, 2)); base.setIndex(bi);
-  const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: .8, fog: false }); mat.customProgramCacheKey = () => 'sh-grass-near2';
+  const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: .8, fog: false }); mat.customProgramCacheKey = () => 'sh-grass-near2';
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
@@ -114,7 +114,7 @@ export function createGrass(ctx, S) {
   }
 
   // ================= mid / far band =================
-  const fmat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: .85, fog: false }); fmat.customProgramCacheKey = () => 'sh-grass-far1';
+  const fmat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: .8, fog: false }); fmat.customProgramCacheKey = () => 'sh-grass-far1';
   fmat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
@@ -150,7 +150,7 @@ export function createGrass(ctx, S) {
       float t=vi>1.5?1.:0.; vec3 wb=vec3(p2.x+co.x,gy-.04-dc*.0004,p2.y+co.y); ${BEND}
       float sd=vi<.5?-.5:(vi<1.5?.5:0.);
       vec3 transformed=wb+vec3(rd.x*bw*sd+off.x+(r0-.5)*.3*t*hgt,yy,rd.y*bw*sd+off.y);
-      vCol=cc.rgb*cc.rgb; vT=t;`)
+      vCol=cc.rgb*cc.rgb; vT=t;${typeof location!=='undefined'&&location.search.includes('grassdbg')?'vCol=vec3(.4,0.,0.);':''}`)
       .replace('#include <project_vertex>', 'vec4 mvPosition=viewMatrix*vec4(transformed,1.); gl_Position=projectionMatrix*mvPosition; if(kill) gl_Position=vec4(2.,2.,2.,1.);')
       .replace('#include <worldpos_vertex>', 'vec4 worldPosition=vec4(transformed,1.);');
     FRAG(sh);
