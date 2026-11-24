@@ -29,8 +29,8 @@ function palette(name, seed) {
   switch (name) {
     case 'house_ranch': case 'house_2st': case 'bungalow': case 'duplex': { const brick = (name === 'house_ranch' && v >= 4) || (name === 'duplex' && v === 1); return [brick ? pk(PAL.brk, h(1)) : pk(PAL.sid, h(1)), pk(PAL.roof, h(2)), pk(PAL.acc, h(3))]; }
     case 'mobile_home': return [pk([C(0xf0eee6), C(0xe6dcc0), C(0xc8d4dc), C(0xd8d0bc), C(0xb8c4b0)], h(1)), C(0xb8b8b4), pk(PAL.acc, h(3))];
-    case 'shop_2st': case 'shop_wide': return [h(4) < .2 ? pk(PAL.stuc, h(1)) : pk(PAL.brk, h(1)), C(0x3a3836), pk(PAL.awn, h(3))];
-    case 'shop_1st': case 'strip_mall': case 'gas_store': case 'motel': case 'big_box': return [pk(PAL.stuc, h(1)), C(0x5a5856), pk(PAL.awn, h(3))];
+    case 'shop_2st': case 'shop_wide': return [name === 'shop_wide' && v === 1 ? pk(PAL.stuc, h(1)) : pk(PAL.brk, h(1)), C(0x3a3836), pk(PAL.awn, h(3))];
+    case 'shop_1st': case 'strip_mall': case 'gas_store': case 'motel': case 'big_box': return [(name === 'shop_1st' && v >= 2) || (name === 'strip_mall' && v === 1) ? pk(PAL.brk, h(1)) : pk(PAL.stuc, h(1)), C(0x5a5856), pk(PAL.awn, h(3))];
     case 'gas_canopy': return [C(0xf2f2f0), C(0xdddddd), pk([C(0xc02020), C(0x1f4fa0), C(0x1f8a3a), C(0xe0a020)], h(3))];
     case 'church2': return [h(1) < .5 ? C(0xf4f2ec) : pk(PAL.brk, h(5)), pk(PAL.roof, h(2)), C(0x3a3a3a)];
     case 'school': case 'apartment2': return [pk(PAL.brk, h(1)), C(0x4a4846), pk(PAL.acc, h(3))];
@@ -376,7 +376,7 @@ export function createBuildings(ctx, S, scatter, tex, data) {
   function pave(b, x, y, z, rot, w, l, v) {
     const c = Math.cos(rot), s = Math.sin(rot), nu = Math.max(1, Math.ceil(w / 7)), nv = Math.max(1, Math.ceil(l / 7)), L = [BL.concrete, BL.park, BL.tar, BL.stone, BL.turf, BL.block][v], col = [[.78, .76, .72], [1, 1, 1], [1, 1, 1], [.75, .66, .55], [1, 1, 1], [.85, .8, .74]][v];
     const tu = v === 1 ? 2.7 : v === 4 ? 9.1 : 3, tv = v === 1 ? 5.4 : v === 4 ? 9.1 : 3; b.set(0 + b.ox, 0, 0 + b.oz, 0, 1, 1, [W1, W1, W1], 0); b.cen[0] = x - b.ox; b.cen[1] = y; b.cen[2] = z - b.oz;
-    const P = (i, j) => { const lx = (i / nu - .5) * w, lz = (j / nv - .5) * l, X = x + lx * c + lz * s, Z = z - lx * s + lz * c; return [X - b.ox, S.terrainAt(X, Z) + .1, Z - b.oz, (lx + w / 2) / tu, (lz + l / 2) / tv]; };
+    const P = (i, j) => { const lx = (i / nu - .5) * w, lz = (j / nv - .5) * l, X = x + lx * c + lz * s, Z = z - lx * s + lz * c; return [X - b.ox, S.terrainAt(X, Z) + (v === 5 ? .07 : .12), Z - b.oz, (lx + w / 2) / tu, (lz + l / 2) / tv]; };
     b.fix = true; for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) { const a = P(i, j + 1), bb = P(i + 1, j + 1), cc = P(i + 1, j), d = P(i, j); b.quad([a[0], a[1], a[2]], [bb[0], bb[1], bb[2]], [cc[0], cc[1], cc[2]], [d[0], d[1], d[2]], [[a[3], a[4]], [bb[3], bb[4]], [cc[3], cc[4]], [d[3], d[4]]], col, L, 0); } b.fix = false;
   }
   ctx.events?.on?.('world:break', (e) => { const p = e?.pos; if (!p) return; for (const r of recs) if (p.x > r.x0 - 30 && p.x < r.x1 + 30 && p.z > r.z0 - 30 && p.z < r.z1 + 30) r.poll = true; });

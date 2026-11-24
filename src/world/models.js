@@ -5,7 +5,7 @@ import * as THREE from 'three';
 
 // kind -> variant ids (picked per instance from its seed). Kinds missing here keep the procedural geometry.
 export const NATURE = {
-  oak: ['oak_a', 'oak_b'], cottonwood: ['cottonwood_a'], pine: ['pine_a', 'pine_b'], spruce: ['spruce_a', 'spruce_b'], cedar: ['cedar_a', 'cedar_b'],
+  oak: ['oak_a', 'oak_b'], cottonwood: ['cottonwood_a'], pine: ['pine_a'], spruce: ['spruce_a', 'spruce_b'], cedar: ['cedar_a', 'cedar_b'],
   mesquite: ['mesquite_a', 'mesquite_b'], dead: ['dead_a'], shrub: ['shrub_a', 'shrub_b', 'shrub_c'], rock: ['rock_a', 'rock_b', 'rock_c', 'rock_d'],
 };
 const BASE = new URL('../../assets/models/nature/', import.meta.url).href;

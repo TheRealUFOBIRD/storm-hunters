@@ -64,7 +64,7 @@ export async function create(ctx) {
   function recentre(cx, cz) { const nx = Math.round((cx - DM * DR / 2) / 256) * 256, nz = Math.round((cz - DM * DR / 2) / 256) * 256; if (Math.abs(nx - dorg.x) < 1200 && Math.abs(nz - dorg.y) < 1200) return; const di = Math.round((nx - dorg.x) / DR), dj = Math.round((nz - dorg.y) / DR), old = dmask.slice(); dmask.fill(0); for (let j = 0; j < DM; j++) { const sj = j + dj; if (sj < 0 || sj >= DM) continue; for (let i = 0; i < DM; i++) { const si = i + di; if (si >= 0 && si < DM) dmask[j * DM + i] = old[sj * DM + si]; } } dorg.x = nx; dorg.y = nz; dDirty = 1; }
   let dmT = 0;
   const w = {
-    S, data, bounds, cities: data.cities, stats: () => ({ ...terrain.stats(), ...roads.stats(), ...scatter.stats(), ...city.stats(), pool: pool.size }),
+    S, data, bounds, cities: data.cities, water, stats: () => ({ ...terrain.stats(), ...roads.stats(), ...scatter.stats(), ...city.stats(), pool: pool.size }),
     heightAt: S.heightAt, terrainAt: S.terrainAt,
     normalAt(x, z, o = nv) { const e = 1; return o.set(S.heightAt(x - e, z) - S.heightAt(x + e, z), 2 * e, S.heightAt(x, z - e) - S.heightAt(x, z + e)).normalize(); },
     surfaceAt, biomeAt, waterLevelAt: S.waterLevelAt, isLand: (x, z) => S.waterLevelAt(x, z) === -Infinity, stateAt: S.stateAt,

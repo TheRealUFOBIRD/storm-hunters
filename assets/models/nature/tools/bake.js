@@ -218,8 +218,8 @@ function stump(w, H, r, A, palUV) {
   const c = compact(pos, w.nrm, w.uv, null, new Uint32Array(keep)); const cols = []; for (let v = 0; v < c.pos.length / 3; v++) cols.push(235, 0, 0);
   // cap
   const capP = [], capN = [], capU = [], capC = [], capI = [], cu = [(A / 2 + A / 4) / A, 1 - (A - 2) / A], seg = 12, o = c.pos.length / 3;
-  capP.push(ax, hc + tr * .3, az); capN.push(0, 1, 0); capU.push(...cu); capC.push(255, 0, 0);
-  for (let k = 0; k <= seg; k++) { const a = k / seg * Math.PI * 2, x = ax + Math.cos(a) * tr * .95, z = az + Math.sin(a) * tr * .95; capP.push(x, jag(x, z) - tr * .5 * (k & 1), z); capN.push(Math.cos(a) * .3, 1, Math.sin(a) * .3); capU.push(...cu); capC.push(200, 0, 0); }
+  capP.push(ax, hc + tr * .2, az); capN.push(0, 1, 0); capU.push(...cu); capC.push(255, 0, 0);
+  for (let k = 0; k <= seg; k++) { const a = k / seg * Math.PI * 2, x = ax + Math.cos(a) * tr * .95, z = az + Math.sin(a) * tr * .95; capP.push(x, hc + tr * .12 + (k & 1) * tr * .1, z); capN.push(Math.cos(a) * .3, 1, Math.sin(a) * .3); capU.push(...cu); capC.push(200, 0, 0); }
   for (let k = 0; k < seg; k++) capI.push(o, o + 2 + k, o + 1 + k);
   const pos2 = new Float32Array([...c.pos, ...capP]), nrm2 = new Float32Array([...c.nrm, ...capN]), uv2 = new Float32Array([...c.uv, ...capU]), idx2 = new Uint32Array([...c.idx, ...capI]);
   return pack(pos2, nrm2, uv2, cols.concat(capC), idx2);
@@ -231,7 +231,7 @@ function pack(pos, nrm, uv, cols, idx, colFn) {
   const I = n < 65536 ? new Uint16Array(idx) : new Uint32Array(idx); return { P, N, U, C, I, nv: n, ni: idx.length };
 }
 async function finish(cfg, lods, atlas, atlasN, H, A, crown) {
-  const g = atlas.getContext('2d'); g.fillStyle = 'rgb(150,120,84)'; g.fillRect(A / 2 + A / 4 - 4, A - 4, 8, 4); // stump cap texel
+  const g = atlas.getContext('2d'); g.fillStyle = 'rgb(118,92,64)'; g.fillRect(A / 2 + A / 4 - 4, A - 4, 8, 4); // stump cap texel
   // binary: 'VEG1' u32 jsonLen json (pad4) then per lod P N U C I
   const meta = { id: cfg.id, H: +H.toFixed(3), A, crown: crown ? { y: +crown.y.toFixed(2), r: +crown.rx.toFixed(2), ry: +crown.ry.toFixed(2) } : null, lods: lods.map((l) => (l ? { nv: l.nv, ni: l.ni, i32: l.I instanceof Uint32Array } : null)) };
   const js = new TextEncoder().encode(JSON.stringify(meta)), jl = (js.length + 3) & ~3, chunks = [new Uint8Array([86, 69, 71, 49]), new Uint8Array(new Uint32Array([jl]).buffer), (() => { const b = new Uint8Array(jl).fill(32); b.set(js); return b; })()];

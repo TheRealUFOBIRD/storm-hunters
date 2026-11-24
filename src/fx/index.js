@@ -9,6 +9,7 @@ import { createLightning } from './lightning.js';
 import { createDebris, breakSet } from './debris.js';
 import { createTornadoFx } from './tornadoFx.js';
 import { damp, smoothstep } from '../core/math.js';
+const SPRAY = new THREE.Vector3(), SPV = new THREE.Vector3(), SPRAY_C = [0.82, 0.86, 0.9];
 
 export async function create(ctx) {
   const soft = makeSoft(ctx), ground = makeGround(ctx); let particles, rain, hail, wind, bolts, debris, torn, built = [];
@@ -62,6 +63,8 @@ export async function create(ctx) {
     puff(pos, vel, color, size = 1, life = 2, alpha = 0.4) { particles.emit(0, pos.x, pos.y, pos.z, vel?.x || 0, vel?.y || 0, vel?.z || 0, life, size * 0.4, size * 1.6, color[0], color[1], color[2], alpha, 1.2, Ws.x, 0.1, Ws.z); },
     update(dt) {
       if (!(dt > 0)) return; const cam = ctx.camera.position, st = ctx.storms, w = ctx.world; soft.update();
+      // tornado over water: white spray ring at the waterline (data from world.water.spray)
+      const spr = w?.water?.spray; if (spr?.length) for (const s of spr) { const n = Math.min(6, Math.ceil(s.amount * 6 * dt * 60)); for (let i = 0; i < n; i++) { const a = Math.random() * 6.283, r = s.r * (0.6 + 0.6 * Math.random()); SPRAY.set(s.x + Math.cos(a) * r, s.y + 0.5, s.z + Math.sin(a) * r); SPV.set(-Math.sin(a) * 30, 6 + Math.random() * 14, Math.cos(a) * 30); api.puff(SPRAY, SPV, SPRAY_C, 6 + Math.random() * 10, 3, 0.35 * s.amount); } }
       const H = ctx.renderer?.domElement?.height || innerHeight, px = 2 * Math.tan(ctx.camera.fov * Math.PI / 360) / Math.max(300, H);
       if (lastCam.distanceToSquared(cam) > 3600) camVel.set(0, 0, 0); else { W.copy(cam).sub(lastCam).divideScalar(dt); camVel.lerp(W, Math.min(1, dt * 12)); } lastCam.copy(cam); ground.update(cam);
       const gy = w ? w.heightAt(cam.x, cam.z) : 0, agl = cam.y - gy; if (st?.windAt) st.windAt(cam.x, gy + Math.max(2.5, Math.min(agl, 60)), cam.z, W); else W.set(4, 0, 1); Ws.lerp(W, Math.min(1, dt * 4));

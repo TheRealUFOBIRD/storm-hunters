@@ -206,6 +206,8 @@ export async function create(ctx) {
 
   const gfx = {
     renderer, sun, stats, shared, csm, atm, vol, post, stormMap,
+    // scene colour before TAA and the resolved volumetric layer, for transparents that refract/reflect (water)
+    sceneColor: { get value() { return post.comp?.texture || null; } }, volumeTexture: { get value() { return vol.out?.textures?.[0] || null; } },
     depthTexture: { value: null }, resolution, cameraNearFar: { value: new THREE.Vector2(0.15, 60000) }, depthParams: depthK,
     linearDepthGLSL: DEPTH_GLSL, lightningGain: 1, haze: { beta: 8.5e-5 },
     // fog for transparent shaders: uniforms {...gfx.fogUniforms}, GLSL gfx.fogGLSL -> vec3 applyAerial(color, uCamPos, rayDir, dist)

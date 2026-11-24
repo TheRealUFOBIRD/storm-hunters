@@ -35,7 +35,7 @@ export function makeCityGen(s) {
     let p = plans.get(c); if (p) return p;
     const S = c.block || (c.town ? 120 : 132), R = c.radius * .96, n = Math.max(1, Math.floor(R / S)), key = (c.x & 4095) ^ ((c.z & 4095) << 3);
     const h = (k) => hash2(key, k, 4242);
-    p = { S, R, n, key, hb: S / 2 - 7.6, mh: Math.max(1, Math.round(n * .5)), dt: S * (1.25 + 1.6 * Math.min(1, c.pop / 1.2e6)), indAng: h(1) * 6.283,
+    p = { S, R, n, key, hb: S / 2 - 7.6, mh: Math.max(1, Math.round(n * .5)), dt: S * (.9 + 1.2 * Math.min(1, c.pop / 1.2e6)), indAng: h(1) * 6.283,
       wt: c.town ? [h(2) < .5 ? -1 : 0, Math.floor(h(3) * 2 * n) - n] : [Math.floor(h(2) * 2 * n) - n, Math.round(n * .7) * (h(3) < .5 ? -1 : 1)],
       church: [Math.floor(h(4) * 2 * n) - n, Math.floor(h(5) * 2 * n) - n], schoolSide: Math.floor(h(6) * 4), mobile: h(7) < .65, elevator: c.town, hmax: 70 + 170 * Math.min(1, c.pop / 1.5e6) };
     plans.set(c, p); return p;
@@ -52,7 +52,7 @@ export function makeCityGen(s) {
       let zone = 'res';
       if (c.town) { if ((bi === -1 || bi === 0) && Math.abs(bj + .5) <= P.mh) zone = 'main'; }
       else { const ang = Math.abs(((Math.atan2(bz - c.z, bx - c.x) - P.indAng) % 6.283 + 9.425) % 6.283 - 3.1416);
-        const dm = d * P.R; if (dm < P.dt) zone = 'cbd'; else if (dm < P.dt + 1.5 * S) zone = 'mid'; else if (ang < .6 && d > .42) zone = 'ind'; else if (d < .62 && h(90) < .3) zone = 'mid'; }
+        const dm = d * P.R; if (dm < P.dt) zone = 'cbd'; else if (dm < P.dt + 1.1 * S) zone = 'mid'; else if (ang < .6 && d > .42) zone = 'ind'; else if (d < .62 && h(90) < .3) zone = 'mid'; }
       if (towersOnly && zone !== 'cbd' && zone !== 'mid') continue;
       if (zone === 'cbd' || zone === 'mid') downtown(c, P, zone, bx, bz, d * P.R, h, emit);
       else if (zone === 'ind') industrial(bx, bz, hb, h, emit);
@@ -141,7 +141,7 @@ export function makeCityGen(s) {
     const tx = -nz, tz = nx, px = x + tx * 42 - nx * 4, pz = z + tz * 42 - nz * 4; if (fits(px, pz, rot, 10, 16, 2)) { emit(KI.pavement, px, pz, rot, 20, 32, PAVE.parking / 6 + .01); for (let k = 0; k < 6; k++) if (h(20 + k) < .6) emit(KI.car, px + tx * (k & 1 ? 4.5 : -4.5) + nx * (-11 + Math.floor(k / 2) * 5), pz + tz * (k & 1 ? 4.5 : -4.5) + nz * (-11 + Math.floor(k / 2) * 5), rot + (k & 1 ? Math.PI / 2 : -Math.PI / 2), 1, 1, h(30 + k)); }
   }
   function downtown(c, P, zone, bx, bz, d, h, emit) {
-    const { hb } = P;
+    const { hb } = P; if (fits(bx, bz, 0, hb - 1, hb - 1, .2)) emit(KI.pavement, bx, bz, 0, 2 * hb + 1, 2 * hb + 1, PAVE.plaza / 6 + .01);
     for (let q = 0; q < 4; q++) {
       const qx = q & 1 ? 1 : -1, qz = q & 2 ? 1 : -1, cx = bx + qx * hb / 2, cz = bz + qz * hb / 2, fx = h(q + 1) < .5, nx = fx ? qx : 0, nz = fx ? 0 : qz, rot = Math.atan2(nx, nz), r = h(q + 10), sd = h(q + 20);
       if (zone === 'cbd' && r < .8) { const slim = h(q + 30) < .4, kn = slim ? 'tower_slim' : 'tower2', fw = slim ? 26 : 34, sxz = Math.min(slim ? 1.5 : 1.25, (hb - 5) / fw) * (.82 + .18 * h(q + 40)), H = P.hmax * (1 - .5 * d / P.dt) * (.45 + .75 * h(q + 50)), half = fw / 2 * sxz;
@@ -187,9 +187,9 @@ export function makeCityGen(s) {
             if (town && inBand && front + 2 * hz > 38) continue;
             const off = r.hw + 4 + front + hz, X = x + nx * off, Z = z + nz * off, rad = Math.hypot(hx, hz) * .9;
             if (ivl.some((o) => o[0] === r.id && o[1] === sd && sa + hx > o[2] && sa - hx < o[3])) continue;
-            if (occ.some((o) => Math.hypot(o[0] - X, o[1] - Z) < o[2] + rad)) continue;
+            if (occ.some((o) => !(o[3] === r.id && o[4] === sd) && Math.hypot(o[0] - X, o[1] - Z) < o[2] + rad)) continue;
             if (!fits(X, Z, rot, hx + .3, hz + .3, row ? 2.2 : 3) || !fits(x + nx * (r.hw + 4 + front / 2), z + nz * (r.hw + 4 + front / 2), rot, Math.min(hx, 8), Math.max(.5, front / 2 - 2), 1.5)) continue;
-            occ.push([X, Z, rad]); ivl.push([r.id, sd, sa - hx - (row ? .05 : 3), sa + hx + (row ? .05 : 3)]); const seed = hh(2); emit(KI[kn], X, Z, rot, 1, 1, seed);
+            occ.push([X, Z, rad, r.id, sd]); ivl.push([r.id, sd, sa - hx - (row ? .05 : 3), sa + hx + (row ? .05 : 3)]); const seed = hh(2); emit(KI[kn], X, Z, rot, 1, 1, seed);
             const fx = X - nx * (hz + front / 2), fz = Z - nz * (hz + front / 2);
             if (row) { emit(KI.pavement, fx, fz, rot, 2 * hx + .1, front + .2, PAVE.concrete / 6 + .01); if (hh(5) < .35) emit(hh(6) < .5 ? KI.bench : KI.trash_can, fx + tx * hx * .5 - nx * 1, fz + tz * hx * .5 - nz * 1, rot, 1, 1, hh(7)); if (hh(8) < .3) emit(KI.street_light, fx - nx * (front / 2 - .6), fz - nz * (front / 2 - .6), rot, 1, 1, hh(9)); continue; }
             if (kn === 'grain_elevator') { elev = true; emit(KI.pavement, fx, fz, rot, 2 * hx + 6, front, PAVE.gravel / 6 + .01); continue; }

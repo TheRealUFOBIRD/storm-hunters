@@ -1,8 +1,8 @@
-// builds assets/audio/*.mp3 + src/audio/manifest.js from the scratch downloads (never executes downloaded content)
+// node build.mjs <repoRoot> [downloadsRoot containing dl/ dl2/ dl3/ dl4/] -> assets/audio/*.mp3 + src/audio/manifest.js (never executes downloaded content)
 import fs from 'node:fs'; import path from 'node:path';
 import { decode, normLoop, normShot, fades, encode, onsets, slice, trimQuiet, SR, gainTo, peak } from './lib.mjs';
 import { track } from './pitch.mjs';
-const S = path.resolve(import.meta.dirname, '..'), ROOT = process.argv[2], OUT = path.join(ROOT, 'assets/audio');
+const ROOT = process.argv[2], S = process.argv[3] || path.resolve(import.meta.dirname, '..'), OUT = path.join(ROOT, 'assets/audio');
 fs.rmSync(OUT, { recursive: true, force: true }); fs.mkdirSync(OUT, { recursive: true });
 const meta = {}; for (const d of ['dl', 'dl2', 'dl3', 'dl4']) { const f = path.join(S, d, 'meta.json'); if (fs.existsSync(f)) Object.assign(meta, JSON.parse(fs.readFileSync(f, 'utf8'))); }
 const src = (id) => { for (const d of ['dl', 'dl2', 'dl3', 'dl4']) { const g = fs.readdirSync(path.join(S, d)).find((f) => f.endsWith('__' + id + '.mp3')); if (g) return path.join(S, d, g); } throw new Error('missing ' + id); };

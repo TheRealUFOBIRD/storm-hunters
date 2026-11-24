@@ -122,3 +122,36 @@ All from Freesound.org, licence **CC0 1.0** for every file (credit as courtesy).
 | windHowl | [wind_howl2_stereo.wav by swiftoid](https://freesound.org/s/117611/) |
 | wiper, wiper_1, wiper_2 | [Windshield Wipers On.wav by NHumphrey](https://freesound.org/s/200975/) |
 | woodCrack_1..woodCrack_3 | [R27-16-Wood Splinters and Creaks.wav by craigsmith](https://freesound.org/s/483354/) |
+
+## Water (src/world/water.js)
+
+No third-party assets. Wave slope maps (FFT, Phillips-like spectrum), foam, caustic and noise textures are generated procedurally at startup.
+
+## Cities & towns (src/world/buildings.js, src/world/citygen.js)
+No external files. All buildings, props, vehicles, signs and the building texture layers added to `src/world/textures.js`
+(neutral brick, office window bay, curtain wall, storefront, house window, garage door, parking stalls, sports turf,
+punched-window brick) are generated procedurally at runtime (original work, same licence as the project).
+`assets/models/city/` is intentionally empty (0 MB models, 0 MB textures).
+
+## Vegetation & rocks (assets/models/nature/) — VEGETATION
+
+All source models from Poly Haven, licence **CC0 1.0**. Baked offline (`assets/models/nature/tools/`, headless three.js + meshoptimizer) into `<id>.bin` (LOD0 / LOD1 / broken stump) + `<id>_c.webp` (albedo+alpha atlas: twig-card tiles rendered from the real leaves + trunk texture) + `<id>_n.webp` (normal atlas).
+
+| Files | Source asset | Author | URL | Licence |
+|---|---|---|---|---|
+| `oak_a.*`, `dead_a.*` | Island Tree 01 | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/island_tree_01 | CC0 |
+| `oak_b.*` | Island Tree 02 | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/island_tree_02 | CC0 |
+| `cottonwood_a.*` | Jacaranda Tree | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/jacaranda_tree | CC0 |
+| `pine_a.*` | Fir Tree 01 | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/fir_tree_01 | CC0 |
+| `spruce_a.*`, `spruce_b.*` | Fir Sapling Medium | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/fir_sapling_medium | CC0 |
+| `cedar_a.*`, `cedar_b.*` | Othonna Cerarioides | James Ray Cock, Jenelle van Heerden | https://polyhaven.com/a/othonna_cerarioides | CC0 |
+| `mesquite_a.*` | Tree Small 02 | Rico Cilliers | https://polyhaven.com/a/tree_small_02 | CC0 |
+| `mesquite_b.*`, `shrub_b.*` | Searsia Lucida | James Ray Cock, Jenelle van Heerden | https://polyhaven.com/a/searsia_lucida | CC0 |
+| `shrub_a.*` | Wild Rooibos Bush | James Ray Cock, Jenelle van Heerden | https://polyhaven.com/a/wild_rooibos_bush | CC0 |
+| `shrub_c.*` | Grass Medium 01 | Rob Tuytel, Rico Cilliers | https://polyhaven.com/a/grass_medium_01 | CC0 |
+| `rock_a.*` | Rock 09 | Jenelle van Heerden | https://polyhaven.com/a/rock_09 | CC0 |
+| `rock_b.*` | Namaqualand Boulder 05 | Jenelle van Heerden, Dario Barresi | https://polyhaven.com/a/namaqualand_boulder_05 | CC0 |
+| `rock_c.*` | Rock 07 | Jenelle van Heerden | https://polyhaven.com/a/rock_07 | CC0 |
+| `rock_d.*` | Stone 01 | Dario Barresi, Rico Cilliers | https://polyhaven.com/a/stone_01 | CC0 |
+
+Palm and cactus remain procedural (no suitable CC0 model found).
