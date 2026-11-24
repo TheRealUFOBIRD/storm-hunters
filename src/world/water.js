@@ -117,7 +117,7 @@ uniform sampler2D uEnv;
 #endif
 uniform sampler2D uNrm, uAux, uDepth, uColor, uVol, uDep; uniform vec4 uDepXf;
 uniform vec4 uDepthK, uAmp, uTor, uLightning; uniform vec2 uRes, uWindDir, uWind; uniform mat4 uVP;
-uniform float uTime, uRain, uGust, uWc, uStormDark, uHasCol, uHasVol, uEnvOn, uFlowT;
+uniform float uTime, uRain, uGust, uWc, uStormDark, uHasCol, uHasVol, uEnvOn, uFlowT; uniform vec2 uDrift; // uDrift: wind drift integrated on the CPU (m per m/s): speed changes only change the rate, never jump the pattern
 uniform vec3 uSunDir, uSunColor, uAmbient; uniform vec3 uAlb[8], uExt[8];
 varying vec3 vWp; varying vec4 vW; varying vec3 vGN; varying vec2 vMac; varying float vM; uniform vec4 uSpot[2], uSpotD[2];
 
@@ -172,7 +172,7 @@ void main(){
   alb *= mix(vec3(1.), vec3(.85,.95,.92), uStormDark);
   // ---------------- waves (LEAN)
   float ws = length(uWind); float wa = atan(uWindDir.y, uWindDir.x); vec2 wdir = uWindDir;
-  vec4 aux0 = texture2D(uAux, p/1900. + uTime*wdir*.0011); float paw = mix(.55, 1.35, smoothstep(.25,.8, aux0.a + (texture2D(uAux, p/430. - uTime*wdir*.004).a-.5)*.6)); paw = mix(1., paw, .45+.4*uGust);
+  vec4 aux0 = texture2D(uAux, (p - uDrift*2.09)/1900.); float paw = mix(.55, 1.35, smoothstep(.25,.8, aux0.a + (texture2D(uAux, (p + uDrift*1.72)/430.).a-.5)*.6)); paw = mix(1., paw, .45+.4*uGust);
   vec3 acc = vec3(0.); float t = uTime;
   float big = ty==0 ? 1. : ty<=2 || ty==5 || ty==6 ? .55 : .12;
   if(ty>=3 && ty!=5 && ty!=6 && dot(vW.xy,vW.xy) > 1e-4){
@@ -181,15 +181,17 @@ void main(){
     float fa = atan(vW.y, vW.x);
     lay(p - vW.xy*ph0/uFlowT, 9.7, fa+.4, vec2(0.), uAmp.z*.8, w0, acc); lay(p - vW.xy*ph1/uFlowT + 3.1, 9.7, fa+.4, vec2(0.), uAmp.z*.8, 1.-w0, acc);
     lay(p - vW.xy*ph0/uFlowT, 2.3, fa-.6, vec2(0.), uAmp.w*.9, w0, acc); lay(p - vW.xy*ph1/uFlowT + 1.3, 2.3, fa-.6, vec2(0.), uAmp.w*.9, 1.-w0, acc);
-    lay(p, 5.3, wa+.9, vec2(t*.07,0.), uAmp.w*.5*paw, 1., acc);
+    lay(p - uDrift*.37, 5.3, .9, vec2(0.), uAmp.w*.5*paw, 1., acc);
     // turbulent boils, slower near the banks
     float edge = abs(vW.w); acc.xy *= mix(1., .55, smoothstep(.6,1.,edge));
   } else {
-    lay(p, 97., wa+.31, vec2(t*.021, 0.), uAmp.x*big, 1., acc);
-    lay(p, 37., wa-.47, vec2(t*.034, t*.004), uAmp.y*big, 1., acc);
-    lay(p, 11.3, wa+.83, vec2(t*.063, 0.), uAmp.z*paw, 1., acc);
-    lay(p, 3.1, wa-.21, vec2(t*.12, -t*.02), uAmp.w*paw, 1., acc);
-    lay(p, .93, wa+1.9, vec2(t*.2, 0.), uAmp.w*.6*paw, 1., acc);
+    // fixed layer orientations (rotating patterns with the wind around the far-away world origin made them jump),
+    // motion from the integrated wind drift at each layer's own speed
+    lay(p - uDrift*2.04, 97., .31, vec2(0.), uAmp.x*big, 1., acc);
+    lay(p - uDrift*1.27, 37., -.47, vec2(0.), uAmp.y*big, 1., acc);
+    lay(p - uDrift*.71, 11.3, .83, vec2(0.), uAmp.z*paw, 1., acc);
+    lay(p - uDrift*.38, 3.1, -.21, vec2(0.), uAmp.w*paw, 1., acc);
+    lay(p - uDrift*.19, .93, 1.9, vec2(0.), uAmp.w*.6*paw, 1., acc);
   }
   if(uRain > .01 && dist < 70.) acc.xy += ripples(p, t*1.6)*uRain*(1.-smoothstep(25.,70.,dist));
   // tornado over water: churned, foaming surface
@@ -240,15 +242,15 @@ void main(){
   vec3 T = exp(-ext*(path + depthV));
   float foam = 0.;
   {
-    vec2 fd = ty>=3 ? vW.xy : wdir*.35;
-    float fp = texture2D(uAux, (p - fd*t*.9)/6.3).g*.6 + texture2D(uAux, (p - fd*t*.75 + 17.)/2.2).g*.55;
+    vec2 fd = ty>=3 ? vW.xy : wdir*.35; vec2 fdt = ty>=3 ? vW.xy*t : uDrift*.35; // rivers: constant flow; still water: integrated wind drift
+    float fp = texture2D(uAux, (p - fdt*.9)/6.3).g*.6 + texture2D(uAux, (p - fdt*.75 + 17.)/2.2).g*.55;
     // shoreline / around obstacles (soft intersection)
     float sw = .5+.5*sin(t*(ty==0?.85:1.4) - depthV*(ty==0?2.1:4.) + aux0.a*9.);
     float shore = (1.-smoothstep(0., ty==0 ? 1.3 : ty>=3 ? .55 : .7, depthV + (1.-sw)*.25))*mix(.45, 1., sw);
     foam = max(foam, shore*smoothstep(.45,.95,fp+.2*sw)*(ty==0 ? 1. : ty>=3 ? .35 : .6));
     // whitecaps on crests in strong wind
     float wc = uWc*(ty==0 ? 1. : ty==1 ? .85 : ty>=3 ? .35 : .6);
-    if(wc > .01){ float c1 = texture2D(uAux, vec2(cos(wa-.47)*p.x+sin(wa-.47)*p.y, -sin(wa-.47)*p.x+cos(wa-.47)*p.y)/37. + vec2(t*.034, t*.004)).r;
+    if(wc > .01){ float c1 = texture2D(uAux, (p - uDrift*1.27)/37.).r;
       float cr = c1*.75 + fp*.35 + (paw-1.)*.3; foam = max(foam, smoothstep(1.05-wc*.5, 1.15-wc*.35, cr)*min(1., wc*1.6)); }
     // rivers: foam streaks downstream
     if(ty>=3 && ty!=5 && ty!=6) foam = max(foam, smoothstep(.75,1.,fp)*.25*smoothstep(.5,1.,abs(vW.w)));
@@ -321,7 +323,7 @@ export function createWater(ctx, S, shared) {
   const G = ctx.globals, V4 = () => new THREE.Vector4();
   const u = {
     uTime: G.uTime, uRain: G.uRain, uGust: G.uGust || { value: 0 }, uStormDark: G.uStormDark || { value: 0 }, uSunDir: G.uSunDir, uSunColor: G.uSunColor, uAmbient: G.uAmbient, uLightning: G.uLightning || { value: V4() },
-    uWind: { value: new THREE.Vector2(4, 1) }, uWindDir: { value: new THREE.Vector2(1, 0) },
+    uWind: { value: new THREE.Vector2(4, 1) }, uWindDir: { value: new THREE.Vector2(1, 0) }, uDrift: { value: new THREE.Vector2() },
     uNrm: { value: nrm }, uAux: { value: aux }, uDep: { value: dt }, uDepXf: { value: new THREE.Vector4(OX - CELL / 2, OZ - CELL / 2, 1 / (CELL * GX), 1 / (CELL * GZ)) },
     uSpot: { value: [V4(), V4()] }, uSpotD: { value: [V4(), V4()] },
     uGw: { value: [V4(), V4(), V4(), V4(), V4()] }, uGQ: { value: .5 }, uAmp: { value: V4() }, uWc: { value: 0 }, uTor: { value: V4() }, uFlowT: { value: .33 },
@@ -402,6 +404,7 @@ export function createWater(ctx, S, shared) {
     // smoothed local wind; strengthens with gusts
     const gw = G.uWind.value, gust = G.uGust?.value || 0; wind.lerp(gw, .02); const ws = wind.length(); wsS += (ws * (1 + gust * .35) - wsS) * .02;
     u.uWind.value.copy(wind); if (ws > .05) u.uWindDir.value.set(wind.x / ws, wind.y / ws);
+    { const d = Math.min(ctx.time?.dt || 0, .1), wd = u.uWindDir.value, k = .6 + .4 * Math.min(1, wsS / 12); u.uDrift.value.x += wd.x * d * k; u.uDrift.value.y += wd.y * d * k; }
     // Cox-Munk-like slope variance split over the 4 layer groups (big -> small)
     const v = .0025 + .0042 * Math.min(wsS, 24), rain = G.uRain?.value || 0; u.uAmp.value.set(Math.sqrt(v * .16), Math.sqrt(v * .22), Math.sqrt(v * .3), Math.sqrt(v * .32 + rain * .004));
     u.uWc.value = THREE.MathUtils.smoothstep(wsS, 7, 19);

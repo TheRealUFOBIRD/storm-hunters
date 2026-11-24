@@ -15,7 +15,7 @@ export class StormUniforms {
     this.data = new Uint16Array(PROF_N * NT * 4);
     this.tex = new THREE.DataTexture(this.data, PROF_N, NT, THREE.RGBAFormat, THREE.HalfFloatType);
     this.tex.minFilter = this.tex.magFilter = THREE.LinearFilter; this.tex.wrapS = this.tex.wrapT = THREE.ClampToEdgeWrapping; this.tex.generateMipmaps = false; this.tex.needsUpdate = true;
-    this.torU = { uNT: { value: 0 }, uT0: { value: v4(NT) }, uT1: { value: v4(NT) }, uT2: { value: v4(NT) }, uT3: { value: v4(NT) }, uT4: { value: v4(NT) }, uSub: { value: v4(NT * 4) }, uTProf: { value: this.tex } };
+    this.torU = { uNT: { value: 0 }, uT0: { value: v4(NT) }, uT1: { value: v4(NT) }, uT2: { value: v4(NT) }, uT3: { value: v4(NT) }, uT4: { value: v4(NT) }, uSub: { value: v4(NT * 4) }, uSubPh: { value: new Array(NT * 4).fill(0) }, uTProf: { value: this.tex } };
     this.st = new Map(); this.tt = new Map(); this._s = []; this._t = []; this._o = { x: 0, z: 0 }; this.top = 13000;
   }
   groundAt(x, z) { const w = this.ctx.world; const h = w?.heightAt ? w.heightAt(x, z) : 0; return Number.isFinite(h) ? h : 0; }
@@ -66,7 +66,7 @@ export class StormUniforms {
       const dust = t.dust ?? 0.5, dh = Math.min(lcl * 0.34, dustR * (0.3 + 0.42 * str));
       T.uT0.value[i].set(t.x, t.z, y0, lcl); T.uT1.value[i].set(Rm, Math.max(ext, dust > 0.01 ? dustR * 3.2 : 0), vm, rough); T.uT2.value[i].set(dustR, dust, dh, m.rot);
       const c = t.dustColor || [0.42, 0.3, 0.2]; T.uT3.value[i].set(c[0], c[1], c[2], hash(t.seed || 1));
-      let mv = 0, se = 0; for (let k = 0; k < 4; k++) { const s = t.sub?.[k]; if (s) { const rcs = Math.max(3, s.rc || 20); T.uSub.value[i * 4 + k].set(s.a, s.r, s.s ?? 1, rcs); mv = Math.max(mv, s.s ?? 1); se = Math.max(se, (s.r || 0) + rcs * 6 + 40); } else T.uSub.value[i * 4 + k].set(0, 1, 0, 1); }
+      let mv = 0, se = 0; for (let k = 0; k < 4; k++) { const s = t.sub?.[k]; if (s) { const rcs = Math.max(3, s.rc || 20); T.uSub.value[i * 4 + k].set(s.a, s.r, s.s ?? 1, rcs); m.sph ||= [0, 0, 0, 0]; m.sph[k] += dt * Math.min(vm / Math.max(rcs, 6), 2.4); T.uSubPh.value[i * 4 + k] = m.sph[k] % 6283.185; mv = Math.max(mv, s.s ?? 1); se = Math.max(se, (s.r || 0) + rcs * 6 + 40); } else T.uSub.value[i * 4 + k].set(0, 1, 0, 1); }
       if (mv > 0) T.uT1.value[i].y = Math.max(T.uT1.value[i].y, se);
       T.uT4.value[i].set(rc, m.up, t.spin || 1, mv);
     }

@@ -15,6 +15,7 @@ uniform vec4 uT2[NT]; // dustR, dust, dust height, accumulated rotation
 uniform vec4 uT3[NT]; // dust colour, seed
 uniform vec4 uT4[NT]; // rCore, upward advection (m), spin, multi-vortex 0..1
 uniform vec4 uSub[NT*4]; // angle, orbit r, strength, core radius
+uniform float uSubPh[NT*4]; // sub-vortex spin phase, integrated on the CPU (time*rate jumped whenever the rate changed)
 uniform sampler2D uTProf; // x: height 0..1.25 lcl ; y: tornado.  axis dx, axis dz, radius, flare
 `;
 
@@ -143,7 +144,7 @@ float tornadoDens(int i,vec3 p,float lod,float dist,bool hq,out float dust,out f
         float an=s.x-sp*(h*.16/max(s.y,20.)+hk*hk*.9); float orb=s.y*mix(1.,.5,hk*hk)+s.w*.6*sin(h*.011+s.x*3.);
         vec2 qs=q-vec2(cos(an),sin(an))*orb; float rs=length(qs);
         float Rr=s.w*(.6+1.5*pow(hk,1.7)); if(rs>Rr*2.4+14.) { hint=min(hint,rs-Rr*2.); continue; }
-        float sw=sp*(uTime*min(vm/max(s.w,6.),2.4)+h*.045); vec2 qq=rot2(qs,sw);
+        float sw=sp*(uSubPh[i*4+k]+h*.045); vec2 qq=rot2(qs,sw);
         vec4 sn=textureLod(uDetail,vec3(qq.x/(s.w*2.4),(h-e.y*.5)/(s.w*16.),qq.y/(s.w*2.4))+vec3(float(k)*.37,0.,.5),lod);
         vec4 sb=textureLod(uBase,vec3(qq.x/(s.w*5.),(h-e.y*.3)/(s.w*22.),qq.y/(s.w*5.))+vec3(.2,float(k)*.29,0.),lod);
         float ds=rs-Rr*(1.+.38*(sb.g-.5)+.3*(sn.g-.5));

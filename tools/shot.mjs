@@ -8,7 +8,7 @@ const o = (k, d) => { const i = a.indexOf('--' + k); return i < 0 ? d : a[i + 1]
 const FF = process.env.FIREFOX || 'C:/Program Files/Mozilla Firefox/firefox.exe';
 const { server, port } = await serve(0);
 const b = await puppeteer.launch({ browser: 'firefox', executablePath: FF, headless: true, protocolTimeout: 300000,
-  extraPrefsFirefox: { 'webgl.force-enabled': true, 'webgl.disable-fail-if-major-performance-caveat': true, 'dom.ipc.processHangMonitor': false, 'media.autoplay.default': 0, 'layout.frame_rate': 60 } });
+  extraPrefsFirefox: { 'webgl.force-enabled': true, 'webgl.disable-fail-if-major-performance-caveat': true, 'dom.ipc.processHangMonitor': false, 'media.autoplay.default': 0, 'layout.frame_rate': +(process.env.FPS || 60) } });
 let code = 0;
 try {
   const p = await b.newPage(); await p.setViewport({ width: +o('w', 1600), height: +o('h', 900) });
