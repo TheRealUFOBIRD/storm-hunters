@@ -31,10 +31,11 @@ export async function loadSystems(ctx, only, onProgress = () => {}) {
   for (const [k, path] of SYSTEMS) {
     onProgress(k);
     if (only && !only.includes(k)) { if (mocks[k]) ctx[k] = mocks[k](ctx); continue; }
-    try { const m = await import(path); ctx[k] = await m.create(ctx); }
+    const t0 = performance.now();
+    try { const m = await import(path); ctx[k] = await m.create(ctx); ctx.bootTimes = ctx.bootTimes || {}; ctx.bootTimes[k] = Math.round(performance.now() - t0); }
     catch (e) { console.error(`[system ${k}] failed, using mock:`, e?.stack || String(e)); if (mocks[k]) ctx[k] = mocks[k](ctx); }
   }
-  for (const [k] of SYSTEMS) { onProgress('init ' + k); try { await ctx[k]?.init?.(); } catch (e) { console.error(`[init ${k}]`, e?.stack || String(e)); } }
+  for (const [k] of SYSTEMS) { onProgress('init ' + k); const t0 = performance.now(); try { await ctx[k]?.init?.(); } catch (e) { console.error(`[init ${k}]`, e?.stack || String(e)); } const d = Math.round(performance.now() - t0); if (d > 50) (ctx.bootTimes ||= {})['init ' + k] = d; }
 }
 export const UPDATE_ORDER = ['net', 'storms', 'gameplay', 'vehicles', 'player', 'world', 'fx', 'audio', 'ui'];
 const errs = {};

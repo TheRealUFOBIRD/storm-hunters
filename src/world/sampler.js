@@ -18,7 +18,7 @@ const cub = (a, b, c, d, t) => b + .5 * t * (c - a + t * (2 * a - 5 * b + 4 * c 
 // FP: dominance inside a footprint (a higher class footprint always owns a junction); SURF: half width of the drawn top
 // surface (street incl. sidewalk); SKIRT: where the ribbon skirt reaches the ground; SINK: terrainAt drop under ribbons
 export const EDGE = [12.7, 7.2, 9, 4.6], HWK = [10.2, 5.2, 5, 3.6], INFK = [100, 90, 34, 34];
-const PRI = [64, 16, 1, 4], FP = [1e8, 1e6, 1e2, 1e4], SURF = [10.2, 5.2, 7.45, 0], SKIRT = [11.3, 6.3, 7.6, 0], SINK = .16;
+const PRI = [64, 16, 1, 4], FP = [1e8, 1e6, 1e2, 1e4], FPR = [1.5, 1.5, 6, 1.5], SURF = [10.2, 5.2, 7.45, 0], SKIRT = [11.3, 6.3, 7.6, 0], SINK = .16;
 // cubic Hermite road profile on a segment: y0,y1 heights, m0,m1 tangents (height per unit t)
 export const herm = (y0, y1, m0, m1, t) => { const t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0 + (3 * t2 - 2 * t3) * y1 + (t3 - t2) * m1; };
 export const CROPS = ['natural', 'pasture', 'wheat', 'goldwheat', 'corn', 'soy', 'plowed', 'hay', 'cotton', 'stubble'];
@@ -99,7 +99,7 @@ export function makeSampler(data) {
             let w = 1; if (e > 0) { const df = ry > h ? ry - h : h - ry, mx = inf - EDGE[k], bw = k > 1 ? Math.min(mx, 9 + df * 1.6) : Math.min(mx, 16 + 2.4 * df); if (e >= bw) w = 0; else { const f = e / bw; w = 1 - f * f * (3 - 2 * f); } }
             if (w > 0) {
               if (k !== 2 && e < em) em = e; else if (k === 2 && e < 0) em = -1;
-              const w2 = w * w, fp = e < 1.5 ? FP[k] * (e <= 0 ? 1 : 1 - sst(0, 1.5, e)) : 0; if (nc < 8) { CW[nc] = w2 * w2 * PRI[k]; CF[nc] = fp; CY[nc] = ry; CO[nc] = k * 65536 + cr; nc++; } if (fp > 0 && k * 65536 + cr < own) own = k * 65536 + cr; if (w > wm) wm = w;
+              const w2 = w * w, fp = e < FPR[k] ? FP[k] * (e <= 0 ? 1 : 1 - sst(0, FPR[k], e)) : 0; if (nc < 8) { CW[nc] = w2 * w2 * PRI[k]; CF[nc] = fp; CY[nc] = ry; CO[nc] = k * 65536 + cr; nc++; } if (fp > 0 && k * 65536 + cr < own) own = k * 65536 + cr; if (w > wm) wm = w;
               if (k < 3) { if (d < SURF[k] + .5 && ry < fmin) fmin = ry; const v = d - SURF[k], g = v <= 0 ? 1 : 1 - sst(0, (SKIRT[k] - SURF[k]) * .6, v); if (g > sk) sk = g; } // under a drawn ribbon
             }
           }

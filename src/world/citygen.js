@@ -183,7 +183,7 @@ export function makeCityGen(s) {
             else { if (roll > (town ? .85 : .6)) continue;
               if (!elev && dd > P.R * .7 && roll < .3) kn = 'grain_elevator'; else if (roll < .12) kn = 'gas_store'; else if (roll < .2) kn = 'motel'; else if (roll < (town ? .34 : .34)) kn = 'shop_1st'; else if (!town && roll < .44) kn = 'strip_mall'; else if (!town && roll < .49) kn = 'big_box'; else if (roll < .5) kn = 'warehouse2'; else kn = town ? (roll < .68 ? 'house_ranch' : roll < .78 ? 'bungalow' : 'house_2st') : 'shop_1st'; }
             if (!kn) continue; if (kn === 'gas_store' && gasN++ >= (town ? 2 : 6)) kn = 'shop_1st';
-            const K = KIND[KI[kn]], hx = K.col[1], hz = K.col[3], row = kn === 'shop_2st' || kn === 'shop_wide' || (core && kn === 'shop_1st'), front = row ? 4 : kn === 'gas_store' ? 22 : kn === 'grain_elevator' ? 16 : kn === 'big_box' ? 40 : kn.startsWith('house') || kn === 'bungalow' ? 9 : 13;
+            const K = KIND[KI[kn]], hx = K.col[1], hz = K.col[3], row = kn === 'shop_2st' || kn === 'shop_wide' || (core && kn === 'shop_1st'), front = row ? 4 : kn === 'gas_store' ? 22 : kn === 'grain_elevator' ? 22 : kn === 'big_box' ? 40 : kn.startsWith('house') || kn === 'bungalow' ? 9 : 13;
             if (town && inBand && front + 2 * hz > 38) continue;
             const off = r.hw + 4 + front + hz, X = x + nx * off, Z = z + nz * off, rad = Math.hypot(hx, hz) * .9;
             if (ivl.some((o) => o[0] === r.id && o[1] === sd && sa + hx > o[2] && sa - hx < o[3])) continue;
@@ -192,7 +192,7 @@ export function makeCityGen(s) {
             occ.push([X, Z, rad, r.id, sd]); ivl.push([r.id, sd, sa - hx - (row ? .05 : 3), sa + hx + (row ? .05 : 3)]); const seed = hh(2); emit(KI[kn], X, Z, rot, 1, 1, seed);
             const fx = X - nx * (hz + front / 2), fz = Z - nz * (hz + front / 2);
             if (row) { emit(KI.pavement, fx, fz, rot, 2 * hx + .1, front + .2, PAVE.concrete / 6 + .01); if (hh(5) < .35) emit(hh(6) < .5 ? KI.bench : KI.trash_can, fx + tx * hx * .5 - nx * 1, fz + tz * hx * .5 - nz * 1, rot, 1, 1, hh(7)); if (hh(8) < .3) emit(KI.street_light, fx - nx * (front / 2 - .6), fz - nz * (front / 2 - .6), rot, 1, 1, hh(9)); continue; }
-            if (kn === 'grain_elevator') { elev = true; emit(KI.pavement, fx, fz, rot, 2 * hx + 6, front, PAVE.gravel / 6 + .01); continue; }
+            if (kn === 'grain_elevator') { elev = true; emit(KI.pavement, fx + nx * 4, fz + nz * 4, rot, 2 * hx + 14, front + 8, PAVE.gravel / 6 + .01); continue; }
             if (kn === 'gas_store') { const gx = X - nx * (hz + 10.5), gz = Z - nz * (hz + 10.5); emit(KI.gas_canopy, gx, gz, rot, 1, 1, seed); emit(KI.pavement, fx, fz, rot, 2 * hx + 16, front, PAVE.concrete / 6 + .01); if (hh(3) < .6) emit(KI.car, gx + tx * 3.4 - nx * 2.6, gz + tz * 3.4 - nz * 2.6, rot + Math.PI / 2, 1, 1, hh(4)); continue; }
             if (kn.startsWith('house') || kn === 'bungalow') { emit(KI.pavement, fx, fz, rot, 3.4, front, PAVE.concrete / 6 + .01); if (hh(3) < .6) emit(KI.car, fx, fz, rot, 1, 1, hh(4)); if (hh(5) < .6) emit(KI.oak, fx + tx * (hx + 3), fz + tz * (hx + 3), hh(6) * 6, .8, .9, hh(7)); continue; }
             emit(KI.pavement, fx, fz, rot, 2 * hx + 4, front, PAVE.parking / 6 + .01); const nc = Math.floor(2 * hx / 3.2); for (let k = 0; k < nc; k++) if (hh(10 + k) < .45) { const u = (k - nc / 2 + .5) * 3.1; emit(KI.car, fx + tx * u - nx * 2, fz + tz * u - nz * 2, rot + (hh(20 + k) < .5 ? 0 : Math.PI), 1, 1, hh(30 + k)); }

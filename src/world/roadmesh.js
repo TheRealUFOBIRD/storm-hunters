@@ -75,14 +75,18 @@ export function createRoads(ctx, S, tex, shared) {
       for (let c = 0; c < m; c++) { const u = xs[c], X = x - tz * u, Z = z + tx * u; P.push(X, y - CROWN * Math.min(Math.abs(u), r.hw) + ys[c], Z); const sl = k < 2 && Math.abs(u) > .1 && Math.abs(u) <= r.hw ? Math.sign(u) * CROWN : 0; NR.push(-tz * sl - tx * dy, 1, tx * sl - tz * dy); A.push(u, s * sk, k, S.otherEdge(X, Z, r.id)); }
       if (t) for (let c = 0; c + 1 < m; c++) { const b = base + (t - 1) * m + c; IX.push(b, b + 1, b + m, b + 1, b + m + 1, b + m); }
     }
-    if (seg.B[i]) bridge(r, ax, az, ya, bx, bz, yb, T0, T1, s0, s1);
+    if (seg.B[i]) bridge(r, ax, az, ya, bx, bz, yb, T0, T1, s0, s1, m0, m1);
   }
-  function bridge(r, ax, az, ya, bx, bz, yb, t0, t1, s0, s1) { // parapets + deck underside + piers (kind 4)
-    const w = r.hw + .25, prof = [[-w - .35, -1.5], [-w - .35, 1.0], [-w - .12, 1.0], [-w, .35], [-w, -.2]], quad = (pts, n) => { const b = P.length / 3; for (const v of pts) { P.push(v[0], v[1], v[2]); NR.push(n[0], n[1], n[2]); A.push(v[3], v[4], 4, 99); } IX.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2); };
-    const at = (u, y, e) => e ? [bx - t1.z * u, yb + y, bz + t1.x * u, u + y, s1] : [ax - t0.z * u, ya + y, az + t0.x * u, u + y, s0];
+  function bridge(r, ax, az, ya, bx, bz, yb, t0, t1, s0, s1, m0, m1) { // parapets + deck underside + piers (kind 4), only over the open span
+    const L = Math.max(1, s1 - s0), Y = (f) => herm(ya, yb, m0, m1, f), N = 24; let f0 = 2, f1 = -1;
+    for (let k = 0; k <= N; k++) { const f = k / N, x = ax + (bx - ax) * f, z = az + (bz - az) * f; if (S.waterLevelAt(x, z) > -1e8 || S.terrainAt(x, z) < Y(f) - 2.5) { if (f < f0) f0 = f; f1 = f; } }
+    if (f1 < 0) return; f0 = Math.max(0, f0 - 3 / L); f1 = Math.min(1, f1 + 3 / L);
+    const w = r.hw + .25, prof = [[-w - .3, -1.3], [-w - .3, .8], [-w - .1, .8], [-w, .3], [-w, -.2]], quad = (pts, n) => { const b = P.length / 3; for (const v of pts) { P.push(v[0], v[1], v[2]); NR.push(n[0], n[1], n[2]); A.push(v[3], v[4], 4, 99); } IX.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2); };
+    const at = (u, y, e) => { const f = e ? f1 : f0; let tx = t0.x + (t1.x - t0.x) * f, tz = t0.z + (t1.z - t0.z) * f; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l; return [ax + (bx - ax) * f - tz * u, Y(f) + y, az + (bz - az) * f + tx * u, u + y, s0 + L * f]; };
     for (const sg of [1, -1]) for (let i = 0; i + 1 < prof.length; i++) { const [u0, y0] = prof[i], [u1, y1] = prof[i + 1], nx = (y1 - y0), ny = -(u1 - u0), l = Math.hypot(nx, ny), n = [(-t0.z * -nx * sg) / l, ny / l, (t0.x * -nx * sg) / l]; quad([at(u0 * sg, y0, 0), at(u1 * sg, y1, 0), at(u1 * sg, y1, 1), at(u0 * sg, y0, 1)], n); }
-    quad([at(-w - .35, -1.5, 0), at(w + .35, -1.5, 0), at(w + .35, -1.5, 1), at(-w - .35, -1.5, 1)], [0, -1, 0]);
-    for (const u of [-w * .55, w * .55]) { const cx = ax - t0.z * u, cz = az + t0.x * u, g = S.terrainAt(cx, cz) - 4; for (let k = 0; k < 8; k++) { const a0 = k / 8 * 6.2832, a1 = (k + 1) / 8 * 6.2832, R = .75, v = (a, y) => [cx + Math.cos(a) * R, y, cz + Math.sin(a) * R, a, y]; quad([v(a0, g), v(a1, g), v(a1, ya - 1.5), v(a0, ya - 1.5)], [Math.cos(a0), 0, Math.sin(a0)]); } }
+    quad([at(-w - .3, -1.3, 0), at(w + .3, -1.3, 0), at(w + .3, -1.3, 1), at(-w - .3, -1.3, 1)], [0, -1, 0]);
+    if ((f1 - f0) * L < 30) return; const fm = (f0 + f1) / 2, pyy = Y(fm);
+    for (const u of [-w * .55, w * .55]) { const cx = ax + (bx - ax) * fm - t0.z * u, cz = az + (bz - az) * fm + t0.x * u, g = S.terrainAt(cx, cz) - 4; for (let k = 0; k < 8; k++) { const a0 = k / 8 * 6.2832, a1 = (k + 1) / 8 * 6.2832, R = .75, v = (a, y) => [cx + Math.cos(a) * R, y, cz + Math.sin(a) * R, a, y]; quad([v(a0, g), v(a1, g), v(a1, pyy - 1.3), v(a0, pyy - 1.3)], [Math.cos(a0), 0, Math.sin(a0)]); } }
   }
   const mkGeo = (ox, oz) => { const n = P.length / 3, pa = new Float32Array(P.length); for (let i = 0; i < n; i++) { pa[i * 3] = P[i * 3] - ox; pa[i * 3 + 1] = P[i * 3 + 1]; pa[i * 3 + 2] = P[i * 3 + 2] - oz; } const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pa, 3)); g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(NR), 3)); g.setAttribute('aRd', new THREE.BufferAttribute(new Float32Array(A), 4)); g.setIndex(n > 65535 ? new THREE.BufferAttribute(new Uint32Array(IX), 1) : new THREE.BufferAttribute(new Uint16Array(IX), 1)); P = []; A = []; NR = []; IX = []; return g; };
   const live = new Map(); let job = null; const R = 2600;

@@ -279,6 +279,11 @@ function buildRoads(data, defs, F) {
         pin[i] = 1; pinY[i] = tmp.y; { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1), ux = p[b * 2] - p[a * 2], uz = p[b * 2 + 1] - p[a * 2 + 1], l = Math.hypot(ux, uz) || 1; pinM[i] = tmp.m * (ux * tmp.dx + uz * tmp.dz) / l; } // our slope across the owner = its slope projected on our direction
       }
     }
+    // creeks: measure the wet span of each bridge run; narrow ones become culverts (graded road, no deck, no parapets)
+    for (let i = 0; i < n; i++) if (br[i]) { let j = i; while (j + 1 < n && br[j + 1]) j++; let wet = 0, wmax = -1e9; const sa = Math.max(0, s[i] - 30), sb = Math.min(s[n - 1], s[j] + 30);
+      for (let q = Math.max(0, i - 2); q < Math.min(n - 1, j + 2); q++) { const L = s[q + 1] - s[q]; for (let k = 0; k < L; k += 2) { const sv = s[q] + k; if (sv < sa || sv > sb) continue; const f = k / L, x = p[q * 2] + (p[q * 2 + 2] - p[q * 2]) * f, z = p[q * 2 + 1] + (p[q * 2 + 3] - p[q * 2 + 1]) * f, wl = sampG.waterLevelAt(x, z); if (wl > -1e8 && wl > sampG.groundAt(x, z) - .4) { wet += 2; if (wl > wmax) wmax = wl; } } }
+      if (wet < 50) for (let q = i; q <= j; q++) { br[q] = 0; wlv[q] = -1e9; g[q] = Math.max(sampG.groundAt(p[q * 2], p[q * 2 + 1]), wmax + 1.6); }
+      i = j; }
     const relax = (a, passes, fixed) => { for (let k = 0; k < passes; k++) for (let i = 1; i < n - 1; i++) { if (fixed && fixed[i]) continue; const v = (a[i - 1] + a[i] * 2 + a[i + 1]) / 4; a[i] = v > lo[i] ? v : lo[i]; } };
     for (let pass = 0; pass < 2; pass++) { const o = g.slice(); for (let i = 0; i < n; i++) { let a = 0, w = 0; for (let k = -sm; k <= sm; k++) { const q = clamp(i + k, 0, n - 1), ww = sm + 1 - Math.abs(k); a += o[q] * ww; w += ww; } g[i] = a / w; } }
     for (let i = 0; i < n; i++) if (wlv[i] > -1e8) { const top = wlv[i] + 4; for (let dir = -1; dir <= 1; dir += 2) for (let q = i; q >= 0 && q < n; q += dir) { const v = top - Math.abs(s[q] - s[i]) * G * .7; if (v <= g[q]) break; if (v > lo[q]) lo[q] = v; } } // bridge clearance ramps that end on the profile

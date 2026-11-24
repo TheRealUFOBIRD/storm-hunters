@@ -130,7 +130,7 @@ export function createField(S) {
     // (stands in for unresolved multiple vortices) keeps the whole core lethal, strongest just inside the wall.
     if (q < 1 && hk < 0.5) {
       const c = vm * touch * fade * (0.85 - 0.15 * q) * (1 - hk * 2), ts = now * 2.3, f = 1 / (6 + rc * 0.05);
-      out.x += c * 1.15 * gnoise(x * f + ts, z * f, 44); out.z += c * 1.15 * gnoise(x * f, z * f - ts, 45); out.y += c * (0.5 + 0.25 * gnoise(x * f - ts, z * f + ts, 46));
+      out.x += c * 1.9 * gnoise(x * f + ts, z * f, 44); out.z += c * 1.9 * gnoise(x * f, z * f - ts, 45); out.y += c * (0.68 + 0.25 * gnoise(x * f - ts, z * f + ts, 46));
     }
   }
   function windAt(x, y, z, out) {

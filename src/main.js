@@ -12,8 +12,11 @@ const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
   await Promise.race([ctx.world.ready, wait(30)]);
   ctx.events.on('game:start', startGame); ctx.events.on('game:quit', quitGame);
   enterMenu();
+  // the first frames compile every shader (several seconds on browsers without parallel compile): say so, and let it paint first
+  bootMsg.textContent = 'Compiling shaders (faster on later visits)'; bootBar.style.width = '92%';
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   let last = performance.now();
-  const loop = (t) => { const dt = Math.max(0.0001, (t - last) / 1000); last = t; stepFrame(ctx, dt); requestAnimationFrame(loop); };
+  const loop = (t) => { const dt = Math.max(0.0001, (t - last) / 1000); last = t; const f0 = performance.now(); stepFrame(ctx, dt); const fd = performance.now() - f0; if (fd > 500) console.log(`[perf] frame ${ctx.time.frame} took ${Math.round(fd)} ms`); requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
   await raf(); await raf(); bootBar.style.width = '100%'; boot.classList.add('done'); setTimeout(() => boot.remove(), 900);
   ctx.ready = true; ctx.events.emit('game:ready');

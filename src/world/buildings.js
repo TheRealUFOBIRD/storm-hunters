@@ -247,11 +247,24 @@ G.tower_slim = (b, v, st) => {
   else { b.cyl(0, 0, hx - .5, hx - .5, 7, H, 16, BL.curt, 2, glass, true, 1.6, 3.8); b.cyl(0, 0, hx - 3, 1, H, H + 10, 16, BL.curt, 2, glass, false, 1.6, 3.8); }
 };
 G.grain_elevator = (b, v, st, seed, info) => {
-  const n = 5; for (let k = 0; k < n; k++) b.cyl(-11 + k * 4.4, 0, 2.3, 2.3, -1, 30, b.lod ? 10 : 14, BL.concrete, 1, W1, !b.ruin, 3, 3);
-  for (let k = 0; k < n - 1; k++) b.box(-11 + k * 4.4 + 1.2, -11 + k * 4.4 + 3.2, -1, 30, -1.6, 1.6, BL.concrete, 1, [.97, .97, .97], 3, 3, false);
-  if (b.ruin) return; b.box(10, 16, -1, 40, -3.5, 3.5, BL.concrete, 1, W1); b.gable(10, 16, -3.5, 3.5, 40, 2, .2, BL.corrugated, 2, W1, false, BL.concrete, 1, W1); b.box(-13.5, 10, 30, 32.5, -1.4, 1.4, BL.corrugated, 2, W1); b.box(15, 15.2, -1, 36, 3.5, 3.6, BL.corrugated, 0, [.5, .5, .5], 1, 1);
-  if (v === 1) for (const x of [-6, 3]) { b.cyl(x, -8.5, 3.6, 3.6, -1, 9, 14, BL.corrugated, 0, [.8, .82, .84], false, 2); b.cyl(x, -8.5, 3.7, .4, 9, 11.4, 14, BL.corrugated, 0, [.76, .78, .8], true, 2); }
-  if (b.sg) { b.sg.push([13, 34, 3.55, 0, 1, 5.6, 1.4, SG('FARMERS CO-OP')]); if (info?.town >= 0) b.sg.push([-1.6, 26, 2.35, 0, 1, 14, 3.5, info.town]); }
+  // Plains slip-form concrete elevator: two groups of touching silos either side of a tall headhouse, a conveyor gallery
+  // on top, a steel bin cluster + leg conveyor behind, scale house. Bands of slightly different tint read as pour joints.
+  const sg = b.lod ? 12 : 18, SX = [-15.2, -9.4, 9.4, 15.2], H = 31, bands = [[-1, 3, [.72, .68, .62]], [3, 12, [.93, .91, .87]], [12, 21, [.98, .96, .92]], [21, 27, [.9, .88, .84]], [27, H, [.96, .94, .9]]];
+  for (const x of SX) for (const [y0, y1, c] of bands) { if (b.ruin && y0 > 8) continue; b.cyl(x, 0, 2.9, 2.9, y0, y1, sg, BL.concrete, 1, c, false, 12, 6); }
+  if (!b.ruin) for (const x of SX) b.cyl(x, 0, 2.95, 2.95, H, H + .35, sg, BL.concrete, 1, [.8, .78, .74], true, 12, 6);
+  for (const x of [-12.3, 12.3]) b.box(x - .6, x + .6, -1, b.ruin ? 6 : H, -.5, .5, BL.concrete, 1, [.62, .6, .56], 12, 6, false); // shadowed valley between silos
+  // headhouse
+  b.box(-4, 4, -1, b.ruin ? 9 : 44, -4.5, 4.5, BL.concrete, 1, [.94, .92, .88], 12, 6, !b.ruin); if (b.ruin) return;
+  b.gable(-4, 4, -4.5, 4.5, 44, 1.6, .25, BL.corrugated, 2, W1, true, BL.corrugated, 2, W1);
+  for (let y = 6; y < 43; y += 5.5) { b.panel(0, y, 4.5, 0, 1, .9, 1.1, BL.hwin, 0, [.8, .8, .78]); b.panel(4, y + 2, 0, 1, 0, .9, 1.1, BL.hwin, 0, [.8, .8, .78]); b.panel(-4, y + 2, 0, -1, 0, .9, 1.1, BL.hwin, 0, [.8, .8, .78]); }
+  b.box(-1.8, 1.8, -1, 4.2, 4.5, 6.5, BL.corrugated, 2, W1); b.panel(0, 1.9, 6.5, 0, 1, 3, 3.6, BL.garage, 0, [.8, .8, .78]); // driveway shed (truck dump)
+  b.box(-18.4, 18.4, H + .35, H + 3, -1.5, 1.5, BL.corrugated, 2, W1); b.quad([-18.6, H + 3, 1.7], [18.6, H + 3, 1.7], [18.6, H + 3.5, 0], [-18.6, H + 3.5, 0], [[0, 0], [12, 0], [12, 1], [0, 1]], W1, BL.corrugated, 2); b.quad([18.6, H + 3, -1.7], [-18.6, H + 3, -1.7], [-18.6, H + 3.5, 0], [18.6, H + 3.5, 0], [[0, 0], [12, 0], [12, 1], [0, 1]], W1, BL.corrugated, 2);
+  // steel bins behind + inclined leg conveyor from the headhouse
+  const BX = v === 1 ? [-9, 0, 9] : [-5, 5];
+  for (const x of BX) { b.cyl(x, -14, 4.2, 4.2, -.5, 10, sg, BL.corrugated, 0, [.8, .82, .84], false, 2, 2); b.cyl(x, -14, 4.35, .5, 10, 12.6, sg, BL.corrugated, 0, [.74, .76, .78], true, 2, 2); }
+  b.quad([-.6, 38, -4.6], [.6, 38, -4.6], [.6, 13, -14], [-.6, 13, -14], [[0, 0], [1, 0], [1, 9], [0, 9]], [.55, .56, .58], BL.corrugated, 0); b.quad([.6, 38.8, -4.6], [-.6, 38.8, -4.6], [-.6, 13.8, -14], [.6, 13.8, -14], [[0, 0], [1, 0], [1, 9], [0, 9]], [.5, .5, .52], BL.corrugated, 0);
+  b.box(10, 16, -1, 3, 9, 13, BL.siding, 0, [.85, .84, .8]); b.gable(10, 16, 9, 13, 3, .8, .3, BL.corrugated, 0, [.6, .62, .64], true, BL.siding, 0, [.85, .84, .8]); b.panel(13, 1.5, 13, 0, 1, 1.2, 1, BL.hwin, 0, W1); // scale house
+  if (b.sg) { b.sg.push([0, 40, 4.55, 0, 1, 7.2, 1.8, SG('FARMERS CO-OP')]); if (info?.town >= 0) b.sg.push([0, 33.6, 4.6, 0, 1, 7.6, 1.9, info.town]); }
 };
 G.water_tower2 = (b, v, st, seed, info) => {
   b.cyl(0, 0, .55, .55, 0, 26, 8, BL.paint, 2, W1, false); for (let k = 0; k < 4; k++) { const a = k * 1.5708 + .785, c = Math.cos(a), s = Math.sin(a); b.quad([s * 5 - c * .2, 0, c * 5 + s * .2], [s * 5 + c * .2, 0, c * 5 - s * .2], [s * 3 + c * .2, 25, c * 3 - s * .2], [s * 3 - c * .2, 25, c * 3 + s * .2], [[0, 0], [1, 0], [1, 8], [0, 8]], W1, BL.paint, 2); b.quad([s * 5 + c * .2, 0, c * 5 - s * .2], [s * 5 - c * .2, 0, c * 5 + s * .2], [s * 3 - c * .2, 25, c * 3 + s * .2], [s * 3 + c * .2, 25, c * 3 - s * .2], [[0, 0], [1, 0], [1, 8], [0, 8]], W1, BL.paint, 2); }
