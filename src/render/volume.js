@@ -22,7 +22,7 @@ uniform sampler2D uTProf; // x: height 0..1.25 lcl ; y: tornado.  axis dx, axis 
 const VOL = HEAD + DEPTH_GLSL + SKY_GLSL + STORM_UNI + TOWER_GLSL + TORNADO_UNI + /* glsl */`
 in vec2 vUv; layout(location=0) out vec4 o0; layout(location=1) out vec4 o1;
 uniform sampler2D uDepth,uM0,uM1,uCs,uBlue; uniform sampler3D uBase,uDetail;
-uniform vec4 uDepthK,uXf,uCsXf; uniform vec2 uRes,uJit; uniform mat4 uInvVP; uniform vec3 uCam,uFwd,uSunDir,uSunE,uSunEHigh,uGroundRad;
+uniform vec4 uDepthK,uXf,uCsXf; uniform vec2 uRes,uJit,uFRes; uniform float uLMode,uPar; uniform mat4 uInvVP; uniform vec3 uCam,uFwd,uSunDir,uSunE,uSunEHigh,uGroundRad;
 uniform float uTime,uFrame,uGround,uTop,uPix,uQual,uStormDark,uMode,uRainSig; uniform int uSteps,uLSteps; uniform vec2 uDrift;
 uniform vec4 uFlash[4]; uniform vec3 uFlashCol; uniform int uNF; uniform vec4 uClip; // camera-inside hints
 const float MAXD=46000.;
@@ -195,9 +195,10 @@ void main(){
   vec2 px=gl_FragCoord.xy; vec3 rd; float tEnd=MAXD; float rawD=0.; float scn=MAXD;
   if(uMode<.5){
     // sub-pixel jittered ray (R2 sequence); the full-res resolve knows where every sample landed
-    vec2 uvJ=(gl_FragCoord.xy+uJit)/uRes;
+    // 0: low-res + sub-pixel jitter (low/medium); 1: checkerboard, samples sit exactly on full-res pixel centres; 2: full res
+    vec2 uvJ=uLMode>1.5?gl_FragCoord.xy/uRes:uLMode>.5?vec2(2.*floor(gl_FragCoord.x)+mod(floor(gl_FragCoord.y)+uPar,2.)+.5,gl_FragCoord.y)/uFRes:(gl_FragCoord.xy+uJit)/uRes;
     vec4 w=uInvVP*vec4(uvJ*2.-1.,.5,1.); rd=normalize(w.xyz/w.w-uCam);
-    vec2 hp=.5/uRes; scn=0.; for(int k=0;k<4;k++){ float z=shLinearDepth(textureLod(uDepth,uvJ+hp*vec2((k&1)*2-1,(k>>1)*2-1)*.7,0.).r,uDepthK); scn=max(scn,z); } scn=scn/max(dot(rd,uFwd),.05); tEnd=min(scn,MAXD);
+    vec2 hp=.5/(uLMode>.5?uFRes:uRes); scn=0.; for(int k=0;k<4;k++){ float z=shLinearDepth(textureLod(uDepth,uvJ+hp*vec2((k&1)*2-1,(k>>1)*2-1)*.7,0.).r,uDepthK); scn=max(scn,z); } scn=scn/max(dot(rd,uFwd),.05); tEnd=min(scn,MAXD);
   } else { float az=(vUv.x-.5)*2.*PI, el=(vUv.y-.5)*PI; rd=vec3(cos(az)*cos(el),sin(el),sin(az)*cos(el)); if(rd.y<0.) tEnd=min(MAXD,(uCam.y-uGround+2.)/-rd.y); px+=13.; }
   Bz=texelFetch(uBlue,ivec2(px)&63,0).r; float j=fract(Bz+uFrame*.61803399);
   vec3 ro=uCam;
@@ -331,7 +332,7 @@ void main(){
 // resolution instead of being a bilinear blow-up of a 1/2 or 1/3 res buffer.
 const TEMPORAL = HEAD + DEPTH_GLSL + TORNADO_UNI + /* glsl */`
 in vec2 vUv; layout(location=0) out vec4 o0; layout(location=1) out vec4 o1;
-uniform sampler2D uCur,uCurD,uHist,uHistD,uDepth; uniform vec2 uRes,uLRes,uJit; uniform vec4 uDepthK; uniform mat4 uInvVP,uPrevVP; uniform vec3 uCam,uFwd; uniform float uDt,uReset,uAlpha;
+uniform sampler2D uCur,uCurD,uHist,uHistD,uDepth; uniform vec2 uRes,uLRes,uJit; uniform float uLMode,uPar; uniform vec4 uDepthK; uniform mat4 uInvVP,uPrevVP; uniform vec3 uCam,uFwd; uniform float uDt,uReset,uAlpha;
 vec3 enc(vec3 c){ return c/(1.+lum(c)); } vec3 dec(vec3 c){ return c/max(1.-lum(c),1e-3); }
 vec3 toY(vec3 c){ return vec3(dot(c,vec3(.25,.5,.25)),dot(c,vec3(.5,0.,-.5)),dot(c,vec3(-.25,.5,-.25))); } vec3 toR(vec3 c){ float t=c.x-c.z; return vec3(t+c.y,c.x+c.z,t-c.y); }
 vec4 E(vec4 c){ return vec4(toY(enc(max(c.rgb,vec3(0.)))),c.a); }
@@ -346,15 +347,16 @@ void main(){
   vec2 fp=gl_FragCoord.xy, uv=fp/uRes;
   vec4 w=uInvVP*vec4(uv*2.-1.,.5,1.); vec3 rd=normalize(w.xyz/w.w-uCam);
   float md=min(shLinearDepth(textureLod(uDepth,uv,0.).r,uDepthK)/max(dot(rd,uFwd),.05),60000.);
-  vec2 k=uRes/uLRes; vec2 lp=uv*uLRes-.5-uJit; ivec2 c0=ivec2(floor(lp+.5)), mx=ivec2(uLRes)-1;
-  float sg=max(k.x*.5,.6); sg=1./(2.*sg*sg); // reconstruction kernel: gaussian, sigma = half a raymarch texel (full px)
+  vec2 k=uRes/uLRes; vec2 lp=uv*uLRes-.5-uJit; ivec2 c0=uLMode>.5?ivec2(int(fp.x)/(uLMode>1.5?1:2),int(fp.y)):ivec2(floor(lp+.5)), mx=ivec2(uLRes)-1;
+  // reconstruction kernel: gaussian, sigma = half a raymarch texel; dens = fresh samples per full-res pixel
+  float sgm=uLMode>.5?.42:max(k.x*.5,.6), dens=uLMode>1.5?1.:uLMode>.5?.5:1./(k.x*k.y); float sg=1./(2.*sgm*sgm);
   vec4 s=vec4(0.),sh=vec4(0.),m1=vec4(0.),m2=vec4(0.),mn=vec4(9.),mxv=vec4(-9.); float ws=1e-6,wsh=0.,wm=1e-6,dsum=0.;
   for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
     ivec2 q=clamp(c0+ivec2(x,y),ivec2(0),mx); vec4 v=texelFetch(uCur,q,0); vec2 vd=texelFetch(uCurD,q,0).xy;
     float er=abs(log2(max(vd.y,.5)/max(md,.5)));
     // a sample that saw past our surface and whose cloud lies behind it contributes nothing here
     if(vd.y>md*1.15){ float kk=smoothstep(md*1.35,md*.6,vd.x); v=mix(vec4(0.,0.,0.,1.),v,kk); er*=.35+.65*kk; }
-    vec2 d=(vec2(q)+.5+uJit)*k-fp; float d2=dot(d,d); float wd=exp(-er*9.);
+    vec2 d=(uLMode>1.5?vec2(q)+.5:uLMode>.5?vec2(2.*float(q.x)+mod(float(q.y)+uPar,2.)+.5,float(q.y)+.5):(vec2(q)+.5+uJit)*k)-fp; float d2=dot(d,d); float wd=exp(-er*9.);
     vec4 e=E(v); float g=exp(-d2*sg)*(wd+1e-4); s+=e*g; ws+=g; dsum+=min(vd.x,60000.)*g;
     float wn=wd*exp(-d2*sg*.25); m1+=e*wn; m2+=e*e*wn; wm+=wn; if(wd>.25){ mn=min(mn,e); mxv=max(mxv,e); }
   }
@@ -363,7 +365,7 @@ void main(){
   // confidence = how much fresh sample weight landed on this pixel this frame, relative to the average (2*pi*sigma^2 in
   // raymarch texels). Blending by confidence (instead of snapping to the nearest sparse sample) keeps edges from
   // re-snapping to each frame's jitter lattice, which read as shaking clouds.
-  float conf=ws/1.571; vec4 cur=sp;
+  float conf=ws/(6.283*sgm*sgm*dens); vec4 cur=sp;
   // reprojection at the cloud depth (+ swirl inside tornadoes)
   vec3 p=uCam+rd*min(cdep,md); float mov=0.;
   for(int i=0;i<uNT;i++){ vec4 a=uT0[i]; float h=p.y-a.z; if(h<-40.||h>a.w*1.1) continue; vec4 pr=textureLod(uTProf,vec2(clamp(h/(a.w*1.25),0.,1.),(float(i)+.5)/float(NT)),0.); vec2 q=p.xz-a.xy-pr.xy; float r=length(q); float lim=max(pr.z*1.6,uT2[i].x*1.4); if(r>lim) continue;
@@ -391,18 +393,23 @@ export class Volume {
     const u = this.u = {
       ...shared.atmU, ...shared.stormU, ...shared.torU,
       uDepth: { value: null }, uM0: { value: null }, uM1: { value: null }, uCs: shared.csTex, uBlue: { value: shared.blue }, uBase: { value: shared.noise.base }, uDetail: { value: shared.noise.detail },
-      uDepthK: shared.depthK, uXf: { value: null }, uCsXf: { value: null }, uRes: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uInvVP: { value: new THREE.Matrix4() }, uCam: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() },
+      uDepthK: shared.depthK, uXf: { value: null }, uCsXf: { value: null }, uRes: { value: new THREE.Vector2() }, uJit: { value: new THREE.Vector2() }, uFRes: { value: new THREE.Vector2() }, uLMode: { value: 0 }, uPar: { value: 0 }, uInvVP: { value: new THREE.Matrix4() }, uCam: { value: new THREE.Vector3() }, uFwd: { value: new THREE.Vector3() },
       uSunDir: { value: new THREE.Vector3() }, uSunE: { value: new THREE.Vector3() }, uSunEHigh: { value: new THREE.Vector3() }, uGroundRad: { value: new THREE.Vector3() },
       uTime: { value: 0 }, uFrame: { value: 0 }, uGround: { value: 0 }, uTop: { value: 13500 }, uPix: { value: 0.002 }, uQual: { value: 1 }, uStormDark: { value: 0 }, uMode: { value: 0 }, uRainSig: { value: 0.0026 },
       uSteps: { value: 100 }, uLSteps: { value: 5 }, uDrift: { value: new THREE.Vector2() }, uFlash: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uFlashCol: { value: new THREE.Vector3(0.75, 0.85, 1.15) }, uNF: { value: 0 }, uClip: { value: new THREE.Vector4() },
     };
     this.mat = fsMaterial(VOL, u);
-    this.mT = fsMaterial(TEMPORAL, { ...shared.torU, uCur: { value: null }, uCurD: { value: null }, uHist: { value: null }, uHistD: { value: null }, uDepth: u.uDepth, uDepthK: shared.depthK, uRes: { value: new THREE.Vector2() }, uLRes: u.uRes, uJit: u.uJit, uInvVP: u.uInvVP, uPrevVP: { value: new THREE.Matrix4() }, uCam: u.uCam, uFwd: u.uFwd, uDt: { value: 0.016 }, uReset: { value: 1 }, uAlpha: { value: 0.07 } });
+    this.mT = fsMaterial(TEMPORAL, { ...shared.torU, uCur: { value: null }, uCurD: { value: null }, uHist: { value: null }, uHistD: { value: null }, uDepth: u.uDepth, uDepthK: shared.depthK, uRes: { value: new THREE.Vector2() }, uLRes: u.uRes, uJit: u.uJit, uLMode: u.uLMode, uPar: u.uPar, uInvVP: u.uInvVP, uPrevVP: { value: new THREE.Matrix4() }, uCam: u.uCam, uFwd: u.uFwd, uDt: { value: 0.016 }, uReset: { value: 1 }, uAlpha: { value: 0.07 } });
     this.mCopy = fsMaterial(COPY2, { uA: { value: null }, uB: { value: null } });
     this.env = hdrRT(192, 96, { count: 2 });
     this.n = 0;
   }
   // lw,lh: raymarch resolution; fw,fh: reconstruction (= render) resolution
+  // mode 'full' | 'checker' | 'jitter' (scale = raymarch / render resolution, jitter mode only)
+  setMode(mode, fw, fh, scale) {
+    this.mode = mode; this.u.uLMode.value = mode === 'full' ? 2 : mode === 'checker' ? 1 : 0;
+    if (mode === 'full') this.resize(fw, fh, fw, fh); else if (mode === 'checker') this.resize(Math.ceil(fw / 2), fh, fw, fh); else this.resize(Math.round(fw * scale), Math.round(fh * scale), fw, fh);
+  }
   resize(lw, lh, fw = lw, fh = lh) {
     lw = Math.max(64, lw | 0); lh = Math.max(36, lh | 0); fw = Math.max(64, fw | 0); fh = Math.max(36, fh | 0);
     if (this.lw !== lw || this.lh !== lh) {
@@ -415,11 +422,12 @@ export class Volume {
       this.a = hdrRT(fw, fh, { count: 2 }); this.b?.dispose(); this.b = hdrRT(fw, fh, { count: 2 });
       // keep the accumulated history across (dynamic) resolution changes instead of resetting to a blurry frame
       if (old) { this.mCopy.uniforms.uA.value = old.textures[0]; this.mCopy.uniforms.uB.value = old.textures[1]; draw(this.r, this.mCopy, this.a); old.dispose(); } else this.reset = true;
-      this.mT.uniforms.uRes.value.set(fw, fh); this.out = this.a;
+      this.mT.uniforms.uRes.value.set(fw, fh); this.u.uFRes.value.set(fw, fh); this.out = this.a;
     }
   }
   render(prevVP, dt) {
-    const n = this.n++; this.u.uJit.value.set(((0.5 + n * 0.7548776662) % 1) - 0.5, ((0.5 + n * 0.5698402910) % 1) - 0.5); // R2
+    const n = this.n++; this.u.uPar.value = n & 1;
+    if (this.u.uLMode.value > 0.5) this.u.uJit.value.set(0, 0); else this.u.uJit.value.set(((0.5 + n * 0.7548776662) % 1) - 0.5, ((0.5 + n * 0.5698402910) % 1) - 0.5); // R2
     this.u.uMode.value = 0; draw(this.r, this.mat, this.cur);
     const t = this.mT.uniforms; t.uCur.value = this.cur.textures[0]; t.uCurD.value = this.cur.textures[1]; t.uHist.value = this.a.textures[0]; t.uHistD.value = this.a.textures[1]; t.uPrevVP.value.copy(prevVP); t.uDt.value = dt; t.uReset.value = this.reset ? 1 : 0; this.reset = false;
     draw(this.r, this.mT, this.b); const x = this.a; this.a = this.b; this.b = x;

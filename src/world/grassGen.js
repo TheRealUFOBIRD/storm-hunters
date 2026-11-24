@@ -1,6 +1,6 @@
 // Grass data baking for the grass clipmaps (runs in the grass worker; main-thread fallback). No three.js.
 // Clipmap texel (I,J) of a level with spacing c samples the world at (I*c, J*c):
-//   H (Float32 x2): ground height (terrainAt, matches the terrain mesh), base blade height in m (0 = no grass)
+//   H (Float32 x2): ground height (terrainAt, matches the terrain mesh), blade height in cm + straw fraction (0 = no grass)
 //   C (Uint8 x4)  : sqrt-encoded linear colour rgb, a = kind*16 + density(0..15)
 // kinds: 0 prairie / natural, 1 pasture, 2 green wheat, 3 gold wheat, 4 corn (rows along z), 5 soy, 7 hay, 9 stubble,
 //        10 corn (rows along x), 11 mown verge
@@ -17,7 +17,8 @@ export function vnoise(x, z, s, seed) {
 
 // blade colour (linear rgb) and base height (m) for a kind; o = [r,g,b,h]
 export function colFor(kind, b, x, z, o) {
-  const p1 = vnoise(x, z, 7, 11), p2 = vnoise(x, z, 23, 12), p3 = vnoise(x, z, 2.3, 13);
+  o[4] = 0;
+  const p1 = vnoise(x, z, 7, 11), p2 = vnoise(x, z, 23, 12), p3 = vnoise(x, z, 2.3, 13), p4 = vnoise(x, z, 61, 14);
   const dry = Math.min(1, Math.max(0, b.arid * 1.25 + .1 + (p2 - .5) * .5 - b.forest * .3));
   let r, g, bb, h;
   if (kind === 2) { r = .085; g = .15; bb = .04; h = .62; }
@@ -28,17 +29,17 @@ export function colFor(kind, b, x, z, o) {
   else if (kind === 7) { r = .16; g = .18; bb = .07; h = .32; }
   else {
     // grassland: mixed greens with straw patches
-    const straw = Math.min(1, dry * (.55 + .6 * p1)), green = 1 - straw;
-    r = .055 * green + .19 * straw; g = .10 * green + .16 * straw; bb = .028 * green + .07 * straw;
-    const lush = .85 + .3 * p3; r *= lush; g *= lush; bb *= lush;
-    if (kind === 11) h = .16 + .14 * p1;                    // mown verge 15-30 cm (x blade var)
+    const straw = Math.min(1, Math.max(0, (.16 + dry * .85) * (.15 + 1.35 * p1 * p1 + .5 * p4) + (p3 - .5) * .25)), green = 1 - straw;
+    r = .055; g = .10; bb = .028; o[4] = straw * .92; /* straw is applied per blade (stippled) in the shader */
+    const lush = (.72 + .3 * p3) * (.8 + .45 * p4); r *= lush; g *= lush; bb *= lush;
+    h *= 1; if (kind === 11) h = .16 + .14 * p1;                    // mown verge 15-30 cm (x blade var)
     else if (kind === 1) h = .17 + .2 * p1 * (1 - b.arid * .5); // pasture 15-45 cm
-    else h = .3 + .28 * p1 * (1 - b.arid * .6) + .08 * p2;      // prairie 30-70 cm
+    else h = (.28 + .3 * p2 * (1 - b.arid * .6) + .1 * p1) * (.85 + .3 * p4); // prairie 30-70 cm
   }
   const k = .88 + .24 * p3; o[0] = r * k; o[1] = g * k; o[2] = bb * k; o[3] = h;
 }
 
-const tmp = [0, 0, 0, 0];
+const tmp = [0, 0, 0, 0, 0];
 // fill a w*h rect of clipmap texels starting at global texel (I0,J0), spacing c
 export function bakeRect(S, c, I0, J0, w, h, H, C) {
   const O = S.O;
@@ -58,7 +59,7 @@ export function bakeRect(S, c, I0, J0, w, h, H, C) {
       let gu = Math.round((x - OX) / CELL), gv = Math.round((z - OZ) / CELL); gu = gu < 0 ? 0 : gu > GX - 1 ? GX - 1 : gu; gv = gv < 0 ? 0 : gv > GZ - 1 ? GZ - 1 : gv; const gk = gv * GX + gu, D = S.data;
       if ((D.coast[gk] < 450 || (D.lakeI && D.lakeI[gk] !== 255)) && S.waterLevelAt(x, z) > y - .05) continue; }
     colFor(kind, b, x, z, tmp);
-    H[k * 2 + 1] = tmp[3]; C[k * 4] = Math.min(255, Math.sqrt(tmp[0]) * 255 + .5); C[k * 4 + 1] = Math.min(255, Math.sqrt(tmp[1]) * 255 + .5); C[k * 4 + 2] = Math.min(255, Math.sqrt(tmp[2]) * 255 + .5);
+    H[k * 2 + 1] = Math.max(1, Math.round(tmp[3] * 100)) + Math.min(.99, tmp[4]); /* cm + straw fraction */ C[k * 4] = Math.min(255, Math.sqrt(tmp[0]) * 255 + .5); C[k * 4 + 1] = Math.min(255, Math.sqrt(tmp[1]) * 255 + .5); C[k * 4 + 2] = Math.min(255, Math.sqrt(tmp[2]) * 255 + .5);
     C[k * 4 + 3] = kind * 16 + Math.max(1, Math.round(d * 15));
   }
 }

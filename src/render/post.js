@@ -68,14 +68,14 @@ vec3 hist(vec2 uv){ vec2 p=uv*uRes,c=floor(p-.5)+.5,f=p-c; vec2 w0=f*(-.5+f*(1.-
   TP(vec2(p12.x,p0.y),w12.x*w0.y) TP(vec2(p0.x,p12.y),w0.x*w12.y) TP(p12,w12.x*w12.y) TP(vec2(p3.x,p12.y),w3.x*w12.y) TP(vec2(p12.x,p3.y),w12.x*w3.y) return max(s/w,vec3(0.)); }
 void main(){
   ivec2 ip=ivec2(gl_FragCoord.xy); ivec2 mx=ivec2(uRes)-1; float best=1e9; vec3 m1=vec3(0.),m2=vec3(0.),cur=vec3(0.); float ws=0.; vec3 mn=vec3(9.),mxc=vec3(-9.);
-  for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){ ivec2 q=clamp(ip+ivec2(x,y),ivec2(0),mx); vec3 c=toY(tm(texelFetch(uCur,q,0).rgb)); m1+=c; m2+=c*c; mn=min(mn,c); mxc=max(mxc,c); float z=shLinearDepth(texelFetch(uDepth,q,0).r,uDepthK); best=min(best,z); vec2 d=vec2(float(x),float(y))+uJit; float w=exp(-2.29*dot(d,d)); cur+=c*w; ws+=w; }
+  for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){ ivec2 q=clamp(ip+ivec2(x,y),ivec2(0),mx); vec3 c=toY(tm(texelFetch(uCur,q,0).rgb)); m1+=c; m2+=c*c; mn=min(mn,c); mxc=max(mxc,c); float z=shLinearDepth(texelFetch(uDepth,q,0).r,uDepthK); best=min(best,z); vec2 d=vec2(float(x),float(y))+uJit; float w=exp(-3.4*dot(d,d)); cur+=c*w; ws+=w; }
   cur/=ws; m1/=9.; m2/=9.; vec3 sd=sqrt(max(m2-m1*m1,vec3(0.)));
   vec4 w=uInvVP*vec4(vUv*2.-1.,.5,1.); vec3 rd=normalize(w.xyz/w.w-uCam); float d=best/max(dot(rd,uFwd),.05);
   float va=textureLod(uVol,vUv,0.).a; float vd=textureLod(uVolD,vUv,0.).x; if(best>59000.) d=va<.6?vd:60000.;
   vec4 pc=uPrevVP*vec4(uCam+rd*d,1.); vec2 uv=pc.xy/pc.w*.5+.5;
   if(uReset>.5||pc.w<=0.||any(lessThan(uv,vec2(0.)))||any(greaterThan(uv,vec2(1.)))){ o=vec4(texelFetch(uCur,ip,0).rgb,1.); return; }
   vec3 h=toY(hist(uv)); float g=1.1; vec3 lo=max(m1-g*sd,mn),hi=min(m1+g*sd,mxc); vec3 c=.5*(lo+hi),e=.5*(hi-lo)+1e-4; vec3 v=h-c; float k=max(max(abs(v.x/e.x),abs(v.y/e.y)),abs(v.z/e.z)); if(k>1.) h=c+v/k;
-  vec2 vel=(uv-vUv)*uRes; float a=mix(.07,.14,sat(length(vel)*.04)); float lc=cur.x,lh=h.x; float dif=abs(lc-lh)/max(max(lc,lh),.15); a*=mix(1.,.6,sat(1.-dif)*.0+.0);
+  vec2 vel=(uv-vUv)*uRes; float a=mix(.085,.2,sat(length(vel)*.5)); // sub-pixel motion resamples the history every frame (low-pass): refresh faster while moving float lc=cur.x,lh=h.x; float dif=abs(lc-lh)/max(max(lc,lh),.15); a*=mix(1.,.6,sat(1.-dif)*.0+.0);
   vec3 r=mix(h,cur,a); o=vec4(itm(max(toR(r),vec3(0.))),1.);
 }`;
 const COPY = HEAD + /* glsl */`in vec2 vUv; out vec4 o; uniform sampler2D uT,uDepth; void main(){ o=textureLod(uT,vUv,0.); gl_FragDepth=textureLod(uDepth,vUv,0.).r; }`;
@@ -142,7 +142,8 @@ export class Post {
     this.mAo = fsMaterial(AO, { uDepth: { value: null }, uDepthK: s.depthK, uProjK: { value: new THREE.Vector4() }, uRes: { value: V2() }, uFrame: { value: 0 } });
     this.mAoB = fsMaterial(AOBLUR, { uT: { value: null }, uDir: { value: V2() } });
     this.mComp = fsMaterial(COMPOSITE, { ...cam, ...sky, uCurVP: s.curVP, uColor: { value: null }, uDepth: { value: null }, uAo: { value: null }, uVol: { value: null }, uVolD: { value: null }, uBlue: { value: s.blue }, uVolRes: { value: V2() }, uAoOn: { value: 1 }, uFrame: { value: 0 }, uFlashSky: { value: new THREE.Vector4() }, uFlashCol: { value: new THREE.Vector3() } });
-    this.mTaa = fsMaterial(TAA, { ...cam, uCur: { value: null }, uHist: { value: null }, uDepth: { value: null }, uVolD: { value: null }, uVol: { value: null }, uRes: { value: V2() }, uJit: { value: V2() }, uPrevVP: { value: new THREE.Matrix4() }, uReset: { value: 1 } });
+    // un-jittered inverse: the resolved pixel is un-jittered, so reprojecting through the jittered matrix shifted the history by the jitter every frame (smear)
+    this.mTaa = fsMaterial(TAA, { ...cam, uInvVP: s.invVPu, uCur: { value: null }, uHist: { value: null }, uDepth: { value: null }, uVolD: { value: null }, uVol: { value: null }, uRes: { value: V2() }, uJit: { value: V2() }, uPrevVP: { value: new THREE.Matrix4() }, uReset: { value: 1 } });
     this.mCopy = fsMaterial(COPY, { uT: { value: null }, uDepth: { value: null } }, { depthWrite: true });
     this.mBlit = fsMaterial(BLIT, { uT: { value: null } });
     this.mDown = fsMaterial(DOWN, { uT: { value: null }, uPx: { value: V2() }, uFirst: { value: 0 } });
@@ -197,6 +198,8 @@ export class Post {
   final(target, o) {
     const f = this.mFinal.uniforms; f.uT.value = this.hdr.texture; f.uBloom.value = this.mips[0].texture; f.uExp.value = this.exp[this.expI].texture; f.uRes.value.set(this.w, this.h); f.uAspect.value = this.w / this.h;
     draw(this.r, this.mFinal, this.ldr);
+    // with TAA the image is already anti-aliased: FXAA on top only softened distant detail, so just upscale/blit
+    if (o?.taa) { this.mBlit.uniforms.uT.value = this.ldr.texture; draw(this.r, this.mBlit, target); return; }
     this.mFx.uniforms.uT.value = this.ldr.texture; this.mFx.uniforms.uPx.value.set(1 / this.w, 1 / this.h); draw(this.r, this.mFx, target);
     void o;
   }

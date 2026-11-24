@@ -14,7 +14,9 @@ const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i
 const JIT = [...Array(16)].map((_, i) => [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
 const clamp = THREE.MathUtils.clamp, smooth = THREE.MathUtils.smoothstep;
 // raymarch resolution relative to the render resolution (the resolve reconstructs full resolution)
-const VOL_SCALE = { low: 0.34, medium: 0.4, high: 0.5, ultra: 0.7 };
+// ultra: every pixel every frame; high: checkerboard (half the pixels per frame, all exactly on pixel centres, no
+// sub-pixel jitter); low/medium: low-res + jittered temporal upsampling
+const VOL_MODE = { low: ['jitter', 0.34], medium: ['jitter', 0.5], high: ['checker', 1], ultra: ['full', 1] };
 const PIXEL_CAP = { low: 1.1e6, medium: 2.1e6, high: 3.7e6, ultra: 8.3e6 };
 const PROBE = HEAD + SKY_GLSL + /* glsl */`
 in vec2 vUv; out vec4 o; uniform sampler2D uEnv,uCs; uniform vec4 uCsXf; uniform vec3 uCam,uSunDir; uniform float uGround;
@@ -38,7 +40,7 @@ export async function create(ctx) {
   const depthK = { value: new THREE.Vector4() }, invVP = { value: new THREE.Matrix4() }, camPos = { value: new THREE.Vector3() }, fwd = { value: new THREE.Vector3() }, groundRad = { value: new THREE.Vector3(0.1, 0.1, 0.1) }, resolution = { value: new THREE.Vector2(1, 1) };
   const stormMap = new StormMap(renderer, noise, SU.stormU, q0.id === 'low' ? 512 : 1024);
   const curVPu = { value: new THREE.Matrix4() }, invVPu = new THREE.Matrix4();
-  const shared = { curVP: curVPu, atm, atmU: atm.u, stormU: SU.stormU, torU: SU.torU, noise, blue, depthK, invVP, cam: camPos, fwd, groundRad, csTex: stormMap.csTex };
+  const shared = { curVP: curVPu, invVPu: { value: invVPu }, atm, atmU: atm.u, stormU: SU.stormU, torU: SU.torU, noise, blue, depthK, invVP, cam: camPos, fwd, groundRad, csTex: stormMap.csTex };
   atm.initAerial(stormMap.csTex.value, stormMap.csXf, camPos.value);
   const vol = new Volume(renderer, shared), post = new Post(renderer, shared), csm = new CSM(renderer, ctx), pmrem = new THREE.PMREMGenerator(renderer);
   vol.u.uM0.value = stormMap.rt.textures[0]; vol.u.uM1.value = stormMap.rt.textures[1]; vol.u.uXf.value = stormMap.xf; vol.u.uCsXf.value = stormMap.csXf;
@@ -68,8 +70,8 @@ export async function create(ctx) {
       sceneRT = new THREE.WebGLRenderTarget(RW, RH, { type: THREE.HalfFloatType, depthTexture: d, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false, samples: 0 });
       post.resize(RW, RH); gfx.depthTexture.value = d; if (!fromDyn) bigReset = true;
     }
-    const vs = VOL_SCALE[q.id] ?? q.volScale;
-    vol.resize(Math.round(RW * vs), Math.round(RH * vs), RW, RH);
+    const vm = VOL_MODE[q.id] || ['jitter', q.volScale];
+    vol.setMode(vm[0], RW, RH, vm[1]);
     resolution.value.set(RW, RH); stats.width = RW; stats.height = RH; stats.scale = sc;
   }
   function applyQuality() {
@@ -122,7 +124,7 @@ export async function create(ctx) {
     // shed volumetric step count first (invisible thanks to the temporal resolve), resolution only as a last resort
     const slow = ms > 18.6 && (!gms || gms > 13), fast = ms < 17.4;
     if (slow && dynQ > 0.62) { dynQ = Math.max(0.6, dynQ - (ms > 26 ? 0.2 : 0.1)); drHold = 1.5; applySteps(); return; }
-    if (slow) { drBad = dyn; nd = Math.max(0.7, dyn - (ms > 26 ? 0.1 : 0.05)); } else if (fast && dyn < 1 && (dyn + 0.05 < drBad - 0.001 || gms && gms < 9)) nd = Math.min(1, dyn + 0.05);
+    if (slow) { drBad = dyn; nd = Math.max(q.id === 'high' || q.id === 'ultra' ? 0.85 : 0.7, dyn - (ms > 26 ? 0.1 : 0.05)); } else if (fast && dyn < 1 && (dyn + 0.05 < drBad - 0.001 || gms && gms < 9)) nd = Math.min(1, dyn + 0.05);
     else if (fast && dyn >= 1 && dynQ < 1 && (!gms || gms < 11)) { dynQ = Math.min(1, dynQ + 0.1); drHold = 4; applySteps(); return; }
     drBad = Math.min(9, drBad + 0.002);
     if (Math.abs(nd - dyn) > 0.01) { drHold = nd < dyn ? 2.5 : 6; dyn = nd; setSizes(true); }
@@ -192,8 +194,8 @@ export async function create(ctx) {
     post.bloom(dt, q.bloom);
     const f = post.mFinal.uniforms, foot = ctx.player && !ctx.player.mock && ctx.player.mode !== 'drive';
     lens.mud = Math.max(0, lens.mud - dt * 0.035); lens.rain = Math.max(0, lens.rain - dt * 0.12); const rainLens = foot ? (G.uRain.value || 0) * 0.5 : 0;
-    f.uTime.value = ctx.time.real % 1000; f.uGrain.value = ctx.settings.get('filmGrain') ? 0.022 + 0.03 * atm.night : 0; f.uBloomW.value = q.bloom ? 0.055 : 0; f.uEV.value = EV; f.uMud.value = lens.mud; f.uDrops.value = Math.max(lens.rain, rainLens); f.uNight.value = atm.night; f.uGreen.value = green * 0.8; f.uSharp.value = q.taa ? 0.32 : stats.scale < 0.95 ? 0.25 : 0;
-    post.final(null);
+    f.uTime.value = ctx.time.real % 1000; f.uGrain.value = ctx.settings.get('filmGrain') ? 0.022 + 0.03 * atm.night : 0; f.uBloomW.value = q.bloom ? 0.055 : 0; f.uEV.value = EV; f.uMud.value = lens.mud; f.uDrops.value = Math.max(lens.rain, rainLens); f.uNight.value = atm.night; f.uGreen.value = green * 0.8; f.uSharp.value = q.taa ? 0.5 : stats.scale < 0.95 ? 0.25 : 0;
+    post.final(null, { taa: q.taa });
     tEnd();
     cam.projectionMatrix.copy(savedP); cam.projectionMatrixInverse.copy(savedPI);
     prevVP.copy(curVP); bigReset = false;

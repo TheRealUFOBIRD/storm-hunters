@@ -110,8 +110,9 @@ export function createGrass(ctx, S) {
       bool corn=kind==4.||kind==10., grassK=kind==0.||kind==1.||kind==11.;
       if(corn){ float cr=kind>9.?p2.x:p2.y; float rw=abs(fract(cr/.76)-.5)*.76; if(rw>.09+smoothstep(30.,90.,dc)*.3) kill=true; }
       float tall=(grassK&&r3<.05)?1.45:1.;
-      float hgt=hb.y*(.68+.55*r6)*tall*wv;
-      vec3 col=cc.rgb*cc.rgb*(.86+.28*rnd);
+      float sf=fract(hb.y), hcm=floor(hb.y)*.01; float hgt=hcm*(.68+.55*r6)*tall*wv;
+      vec3 col=cc.rgb*cc.rgb*(.74+.5*rnd);
+      if(grassK){ vec3 straw=vec3(.2,.165,.075)*(.75+.5*r4); col=mix(col,vec3(col.g*1.05,col.g*1.02,col.b*.8),step(.7,r6)*.5); col=mix(col,straw,thatch?sf*.3:step(r2*.85+.08,sf)); col=mix(col,straw,step(.95,rnd)*.7); }
       // wind with travelling gust waves
       vec2 w=uWind*(1.+uGust*.8*sin(uTime*2.3+p2.x*.15+p2.y*.11)); float fl=0.;
       for(int i=0;i<4;i++){ vec4 T=uTornadoA[i]; if(T.w<1.) continue; vec2 d=p2-T.xy; float r=max(length(d),1.); float v=T.w*2.*r*T.z/(r*r+T.z*T.z); w+=vec2(d.y,-d.x)/r*v-d/r*v*.35; }
@@ -125,7 +126,7 @@ export function createGrass(ctx, S) {
         float lc=min(lev,max(L,0.)+1.); float hs=.62*${S0}*exp2(lc)*(.8+.4*r6)*clamp((70.-dc)/25.,0.,1.)*wv;
         if(!grassK&&kind!=2.&&kind!=3.&&kind!=7.&&kind!=9.) kill=true; if(hs<=.001) kill=true;
         float a=rnd*6.2832; vec2 cv=vec2(vi==1.||vi==2.?1.:-1.,vi>=2.?1.:-1.)*hs; vec2 rc=vec2(cv.x*cos(a)-cv.y*sin(a),cv.x*sin(a)+cv.y*cos(a));
-        vec2 pp=p2+rc; transformed=vec3(pp.x,groundY(pp)+.022+.004*r3,pp.y); vT=.04+.1*r2; col*=.78+.2*r4; hgt=1.;
+        vec2 pp=p2+rc; transformed=vec3(pp.x,groundY(pp)+.022+.004*r3,pp.y); vT=.04+.1*r2; col*=.68+.16*r4; hgt=1.;
       } else {
         float bw=max(corn?.05+.02*r4:(kind==3.||kind==2.?.006:.0045+.0045*r4),dc*uPx);
         float ang=rnd*6.2832; vec2 rd=vec2(cos(ang),sin(ang)); vec2 tv=p2-uCamP.xz; vec2 fc=normalize(vec2(-tv.y,tv.x)+1e-4); if(dot(fc,rd)<0.) fc=-fc;
@@ -134,7 +135,7 @@ export function createGrass(ctx, S) {
         vec2 lean=(vec2(r0,r1)-.5)*.5;
         vec2 off=(dir*(bend+sway)*(1.+fl)+lean)*t*t*hgt; float yy=t*hgt*(1.-fl*.75*t);
         transformed=vec3(p2.x+rd.x*bw*sd+off.x,gy-.03-dc*.0004+yy,p2.y+rd.y*bw*sd+off.y); vT=t;
-        if(grassK){ vS=clamp((col.r-col.g*.8)*6.+.25+.35*r4,0.,1.)*(kind==11.?.5:1.); if(r3<.05) vS=1.3; else if(kind==0.&&r3<.072&&dc<90.) vF=1.+floor(r6*3.); }
+        if(grassK){ vS=clamp(sf*1.2+.15+.3*r4,0.,1.)*(kind==11.?.5:1.); if(r3<.05) vS=1.3; else if(kind==0.&&r3<.072&&dc<90.) vF=1.+floor(r6*3.); }
         else if(kind==2.) vS=.15*r4;
       }
       if(hgt<=.004) kill=true;
@@ -184,7 +185,7 @@ export function createGrass(ctx, S) {
   }
 
   const t0c = performance.now(); let tReady = 0;
-  group.userData.stats = () => ({ nodes: nN, perLod: [...lodCount], verts: nN * NC * NC * VPC, grassJobs: queue.length + jobs.size, grassReady: LV.map((l) => l.ready), bakeMs: tReady, workMs: Math.round(workMs), nW: wk.length, mainThread });
+  group.userData.lv = LV; group.userData.stats = () => ({ nodes: nN, perLod: [...lodCount], verts: nN * NC * NC * VPC, grassJobs: queue.length + jobs.size, grassReady: LV.map((l) => l.ready), bakeMs: tReady, workMs: Math.round(workMs), nW: wk.length, mainThread });
   return { group, update() {
     if (!tReady && LV.every((l) => l.ready)) tReady = Math.round(performance.now() - t0c);
     const c = ctx.camera.position; camP.copy(c);
