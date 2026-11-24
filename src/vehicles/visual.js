@@ -5,7 +5,7 @@ import { BUILDERS, buildKit } from './defs.js';
 import { buildWheel, buildCaliper } from './kit.js';
 import { rbox, pipe, tube, cyl, lathe, torus, Trim } from './mesh.js';
 import { ST } from './kit.js';
-import { makeUniforms, paintMaterial, trimMaterial, glassMaterial, lensMaterial, coneMaterial, glowMaterial } from './materials.js';
+import { makeUniforms, paintMaterial, trimMaterial, glassMaterial, lensMaterial } from './materials.js';
 import { clamp, damp, lerp } from '../core/math.js';
 
 const cache = new Map();
@@ -67,13 +67,8 @@ export class VehicleVisual {
     if (!remote && typeof document !== 'undefined') this.makeScreens(K);
     // mounts
     this.mounts = {}; for (const [k, p] of Object.entries(K.mounts)) { const o = new THREE.Object3D(); o.position.set(p[0], p[1], -p[2]); body.add(o); this.mounts[k] = o; }
-    // lamp glow + volumetric cones
-    this.lampPos = def.lamps || K.lampPos || [[0.66, 0.62, spec.L / 2 - 0.15]]; const lp = this.lampPos[0]; this.glows = []; this.cones = []; this.fxRoot = new THREE.Group(); this.fxRoot.matrixAutoUpdate = true;
-    const pg = new THREE.PlaneGeometry(1, 1); this.mHead = glowMaterial(0xfff0d8); this.mTail = glowMaterial(0xff1a0c); this.mTail.uniforms.uSize.value = 0.5; this.mHead.uniforms.uSize.value = 1.1; const tp = K.tailPos || [0.6, 0.9, -spec.L / 2 + 0.05];
-    for (const s of [-1, 1]) { const g = new THREE.Mesh(pg, this.mHead); g.position.set(lp[0] * s, lp[1] - spec.cgY, -(lp[2] + 0.03) + spec.cgF); this.fxRoot.add(g); const t = new THREE.Mesh(pg, this.mTail); t.position.set(tp[0] * s, tp[1] - spec.cgY, -tp[2] + 0.06 + spec.cgF); this.fxRoot.add(t); this.glows.push(g, t); g.frustumCulled = t.frustumCulled = false; }
-    this.mCone = coneMaterial(); const cg = new THREE.CylinderGeometry(0.06, 2.6, 18, 20, 1, true); cg.translate(0, -9, 0); cg.rotateX(Math.PI / 2 - 0.0); cg.scale(1.5, 0.75, 1); cg.computeVertexNormals(); cg.rotateX(0);
-    for (const s of [-1, 1]) { const c = new THREE.Mesh(cg, this.mCone); c.position.set(lp[0] * s, lp[1] - spec.cgY, -lp[2] + spec.cgF); c.rotation.x = -0.045; this.fxRoot.add(c); this.cones.push(c); c.frustumCulled = false; }
-    this.fxScene = fxScene; if (fxScene) fxScene.add(this.fxRoot);
+    // lamp anchor points (headlight SpotLights are placed here by the vehicle system); lamps glow only through their emissive lenses
+    this.lampPos = def.lamps || K.lampPos || [[0.66, 0.62, spec.L / 2 - 0.15]]; this.tailPos = K.tailPos || [0.6, 0.9, -spec.L / 2 + 0.05]; void fxScene;
     this.state = { steer: 0, brake: 0, lights: false, throttle: 0, dirt: 0.15, wet: 0, reverse: false, hazard: 0 }; this.cur = { susp: [0, 0, 0, 0], spin: [0, 0, 0, 0] }; this.t = 0; this.damageShown = 0; this.lodI = 0; this.anchorK = 0; this.dishA = 0; this.windLocal = new THREE.Vector3(); this.prevVel = new THREE.Vector3(); this.interior = false;
     U.uLamp.value[9] = 0.9;
   }
@@ -113,15 +108,12 @@ export class VehicleVisual {
     const st = this.state, U = this.U, A = this.K.anim; this.t += dt; const t = this.t; U.uTimeV.value = t;
     for (let i = 0; i < 4; i++) { const w = this.wheels[i]; w.steer.position.y = w.y0 + this.cur.susp[i]; w.steer.rotation.y = i < 2 ? -st.steer * 1 : 0; w.spin.rotation.x = w.side > 0 ? -this.cur.spin[i] : this.cur.spin[i]; w.steer.rotation.z = -w.side * 0; }
     if (this.steerMesh) this.steerMesh.rotation.z = -st.steer * 9;
-    const L = U.uLamp.value, on = st.lights ? 1 : 0, dim = env?.night ?? 0.5; const K = lerp(2.2, 1, dim) * 1.6;
-    L[1] = damp(L[1], on * 9 * K, 14, dt); L[6] = on ? 4 * K : 1.2 * K; L[2] = on * 1.6 * K + 0.02; L[3] = damp(L[3], st.brake > 0.08 ? 6 * K : on * 0.25, 20, dt); L[5] = st.reverse ? 3 * K : 0.01; const bl = st.hazard && (t * 1.5) % 1 < 0.5 ? 5 * K : 0.02; L[4] = bl; L[7] = st.bar ? 12 * K : 0.02; const fl = st.beacon ? 1 : 0; L[8] = 0.03 + fl * 6 * K * (Math.sin(t * 9) > 0.2 ? 1 : 0); L[10] = 0.03 + fl * 6 * K * (Math.sin(t * 9 + 3.14) > 0.2 ? 1 : 0); L[9] = 1.1;
+    // lamp lens emissive radiance, fixed physical-ish levels (no day boost): bloom only adds a subtle natural glow
+    const L = U.uLamp.value, on = st.lights ? 1 : 0;
+    L[1] = damp(L[1], on * 7, 14, dt); L[6] = on ? 2.2 : 0.9; L[2] = on * 1.1 + 0.02; L[3] = damp(L[3], st.brake > 0.08 ? 3.2 : on * 0.15, 20, dt); L[5] = st.reverse ? 2.2 : 0.01; const bl = st.hazard && (t * 1.5) % 1 < 0.5 ? 2.6 : 0.02; L[4] = bl; L[7] = st.bar ? 5 : 0.02; const fl = st.beacon ? 1 : 0; L[8] = 0.03 + fl * 3.5 * (Math.sin(t * 9) > 0.2 ? 1 : 0); L[10] = 0.03 + fl * 3.5 * (Math.sin(t * 9 + 3.14) > 0.2 ? 1 : 0); L[9] = 1.1;
     U.uWet.value = st.wet; U.uDirt.value = st.dirt; U.uRain.value = env?.rain || 0;
     if (st.damage !== undefined && Math.abs(st.damage - U.uDamage.value) > 0.001) U.uDamage.value = st.damage;
-    // glow & cones
-    this.object3d.updateMatrixWorld(); this.fxRoot.position.copy(this.object3d.position); this.fxRoot.quaternion.copy(this.object3d.quaternion); const cam = env?.cam; let dist = 10, face = 0, faceT = 0;
-    if (cam) { V.copy(cam).sub(this.object3d.position); dist = V.length(); V.normalize(); V2.set(0, 0, -1).applyQuaternion(this.object3d.quaternion); face = V.dot(V2); faceT = -face; }
-    const far = clamp(dist / 60, 0.25, 3); this.mHead.uniforms.uI.value = on * Math.pow(clamp(face * 1.15), 3) * (0.25 + 1.2 * dim) * 1.6; this.mHead.uniforms.uSize.value = 0.5 + far * 0.75; this.mTail.uniforms.uI.value = (on * 0.25 + (st.brake > 0.08 ? 0.7 : 0)) * Math.pow(clamp(faceT * 1.1), 2) * (0.25 + 0.9 * dim); this.mTail.uniforms.uSize.value = 0.25 + far * 0.4;
-    const wetAir = clamp((env?.rain || 0) * 1.2 + (env?.dust || 0) + 0.06); this.mCone.uniforms.uI.value = on * wetAir * (0.15 + dim) * 0.55; this.mCone.uniforms.uT.value = t; this.fxRoot.visible = this.object3d.visible && (on > 0 || st.brake > 0.08); for (const c of this.cones) c.visible = this.mCone.uniforms.uI.value > 0.01;
+    const cam = env?.cam, dist = cam ? cam.distanceTo(this.object3d.position) : 10;
     if (dist < 80) {
       // whips: spring pendulum driven by acceleration + airflow
       if (this.whips) { V.set(env?.windX || 0, 0, env?.windZ || 0); if (env?.vel) V.sub(env.vel); Q.copy(this.object3d.quaternion).invert(); V.applyQuaternion(Q); let ax = 0, az = 0; if (env?.vel && dt > 1e-4) { V2.copy(env.vel).sub(this.prevVel).multiplyScalar(1 / dt); this.prevVel.copy(env.vel); V2.applyQuaternion(Q); ax = clamp(-V2.x, -25, 25); az = clamp(-V2.z, -25, 25); }
@@ -133,6 +125,6 @@ export class VehicleVisual {
     const ak = (this.anchorK = damp(this.anchorK, st.anchored ? 1 : 0, 2.2, dt)); if (this.parts.skirts) { const b = this.parts.skirts.userData.base; this.parts.skirts.position.y = b[1] - ak * (this.K.skirtDrop || 0.3); } if (this.parts.spikes) { const b = this.parts.spikes.userData.base; this.parts.spikes.position.y = b[1] - ak * 0.55; }
     void A;
   }
-  dispose() { this.object3d.removeFromParent(); this.fxRoot.removeFromParent(); for (const k in this.mats) this.mats[k].dispose(); this.mHead.dispose(); this.mTail.dispose(); this.mCone.dispose(); this.scr?.tex.dispose(); this.scrMat?.dispose(); if (this.whips) for (const w of this.whips) w.m.geometry.dispose(); }
+  dispose() { this.object3d.removeFromParent(); for (const k in this.mats) this.mats[k].dispose(); this.scr?.tex.dispose(); this.scrMat?.dispose(); if (this.whips) for (const w of this.whips) w.m.geometry.dispose(); }
 }
 export const ALL_TYPES = TYPE_IDS;

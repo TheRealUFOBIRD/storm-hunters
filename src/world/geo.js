@@ -144,6 +144,7 @@ export function propGeo(name, lod, extra) {
 }
 // buildings. state 0 intact, 1 roof gone, 2 rubble
 export function bldGeo(name, lod, state, variant = 0) {
+  if (KIND[KI[name]].ext) return null; // city kinds are drawn by buildings.js
   const b = new B(), K = KIND[KI[name]], [, hx, hy, hz] = K.col, H = hy * 2, r = rng(KI[name] * 13 + variant), wall = (l, c) => [l, c];
   if (state === 2) { // rubble pile + slab
     b.box(0, -.3, 0, hx * 1.02, .3, hz * 1.02, BL.concrete, [.6, .58, .55], 3);

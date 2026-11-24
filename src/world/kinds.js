@@ -23,6 +23,22 @@ const bld = (name, hx, hy, hz, w1, w2, o = {}) => add(name, 'bld', { col: ['box'
 bld('farmhouse', 6, 3.6, 5, 50, 68); bld('barn', 6.5, 4.6, 10, 46, 58); bld('shed', 7, 3.2, 11, 46, 60, { debris: 'metal' }); bld('silo', 2.6, 9, 2.6, 62, 78, { debris: 'metal' }); bld('bin', 3.6, 3.4, 3.6, 50, 62, { debris: 'metal' });
 bld('house', 6.5, 2.6, 5, 48, 66); bld('house2', 5.5, 3.6, 5, 49, 68); bld('mobile', 7.2, 1.6, 2.2, 38, 47); bld('church', 5.4, 5, 10, 52, 70); bld('shop', 6, 3.4, 9, 54, 72, { debris: 'brick' }); bld('gas', 9, 2.8, 6, 46, 60, { debris: 'metal' }); bld('motel', 16, 2, 4.2, 48, 64); bld('warehouse', 14, 4, 18, 47, 62, { debris: 'metal' }); bld('apartment', 10, 7, 8, 54, 74, { debris: 'brick' }); bld('office', 12, 12, 11, 66, 92, { debris: 'glass', lod: [300, 5000] });
 bld('tower', 14, 50, 14, 74, 999, { debris: 'glass', lod: [700, 14000], cls: 'land' });
+// ---- CITIES: town & city kinds. ext=1 -> rendered by buildings.js (merged per sector); scatter keeps colliders, damage, net state.
+// Front of every building is local +z. Layout: citygen.js.
+const cb = (name, hx, hy, hz, w1, w2, o = {}) => add(name, 'bld', { col: ['box', hx, hy, hz], mass: 2e5, w: [w1, w2], lod: [0, 0], debris: 'house', ext: 1, ...o });
+cb('house_ranch', 7, 2.75, 5, 48, 66); cb('house_2st', 5.2, 4.2, 4.4, 49, 68); cb('bungalow', 4.4, 2.8, 5, 46, 64); cb('mobile_home', 8, 1.7, 2.3, 38, 47, { debris: 'trailer', mass: 2e4 });
+cb('duplex', 13, 4.1, 6, 50, 70); cb('shop_2st', 4.5, 4.4, 10, 54, 74, { debris: 'store' }); cb('shop_wide', 7, 3.9, 11, 54, 74, { debris: 'store' }); cb('shop_1st', 6, 2.6, 8, 52, 70, { debris: 'store' });
+cb('gas_store', 6.5, 2.2, 4.5, 48, 64, { debris: 'gas' }); cb('motel', 18, 2.2, 5.5, 48, 64, { debris: 'motel' }); cb('strip_mall', 22, 2.8, 9, 52, 70, { debris: 'store' }); cb('big_box', 32, 4.6, 24, 55, 76, { debris: 'warehouse' });
+cb('church2', 6, 6.2, 12, 52, 70, { debris: 'church' }); cb('school', 26, 4, 13, 56, 78, { debris: 'build' }); cb('warehouse2', 20, 4.6, 14, 50, 66, { debris: 'warehouse' }); cb('factory', 25, 6, 16, 56, 76, { debris: 'warehouse' });
+cb('office', 17, 12, 12, 64, 90, { debris: 'office' }); cb('apartment2', 16, 10, 9, 58, 80, { debris: 'build' }); cb('parking_garage', 20, 7.5, 15, 80, 98, { debris: 'office' });
+cb('tower2', 17, 50, 17, 72, 999, { debris: 'office', cls: 'land', mass: 5e6 }); cb('tower_slim', 13, 50, 13, 72, 999, { debris: 'office', cls: 'land', mass: 4e6 });
+cb('grain_elevator', 15, 17, 6, 82, 94, { debris: 'silo', cls: 'land', mass: 1e6 }); add('water_tower2', 'land', { col: ['cyl', 3.2, 34], mass: 3e5, w: [78, 92], lod: [0, 0], debris: 'tower', ext: 1 });
+add('tank', 'land', { col: ['cyl', 7, 12], mass: 2e5, w: [70, 88], lod: [0, 0], debris: 'tank', ext: 1 });
+const cpr = (name, col, mass, brk, w, debris) => add(name, 'prop', { col, mass, brk, w, lod: [0, 0], debris, ext: 1 });
+cpr('gas_canopy', null, 8000, 0, [44, 58], 'gas'); cpr('street_light', ['cyl', .14, 9], 300, 8, [46, 58], 'pole'); cpr('traffic_light', ['cyl', .2, 7], 600, 14, [52, 64], 'pole');
+cpr('hydrant', ['cyl', .2, .85], 120, 3, [80, 99], 'hydrant'); cpr('mailbox', ['cyl', .12, 1.25], 15, 2, [44, 56], 'sign'); cpr('bench', ['box', .9, .45, .3], 60, 3, [52, 62], 'plank');
+cpr('trash_can', ['cyl', .3, 1], 30, 2, [44, 56], 'sheet'); cpr('car', ['box', .95, .78, 2.4], 1400, 0, [42, 55], 'car'); cpr('fence_run', ['box', 3, .6, .06], 40, 3, [44, 56], 'fence'); cpr('dumpster', ['box', 1, .7, .9], 900, 0, [55, 68], 'sheet');
+add('pavement', 'deco', { lod: [0, 0], ext: 1 }); // flat decal: sxz = width m, sy = length m (no collider, no damage)
 export const KIND = D; export const KI = {}; for (const d of D) KI[d.name] = d.id;
 export const NTREE = 8, STRIDE = 8; // kind,x,y,z,rotY,sxz,sy,seed
 export const SEC_IDS = 8192, SS = 512, SOX = -51200, SOZ = -32768, SGX = 200, SGZ = 128;

@@ -73,15 +73,15 @@ export function createGrass(ctx, S) {
   // workers
   const jobs = new Map(), queue = []; let jid = 1, wk = [], mainThread = false;
   try {
-    const nW = (navigator.hardwareConcurrency || 4) >= 6 ? 2 : 1;
+    const nW = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 3));
     for (let i = 0; i < nW; i++) {
       const w = new Worker(new URL('./grassGen.js', import.meta.url), { type: 'module' }), o = { w, ok: false, dead: false, load: 0 };
       w.onerror = (e) => { console.warn('[grass] worker failed, baking on main thread', e.message || ''); o.dead = true; for (const [id, j] of jobs) if (j.o === o) { jobs.delete(id); queue.push(j); } if (wk.every((v) => v.dead)) mainThread = true; };
-      w.onmessage = (e) => { const m = e.data; if (m.t === 'ready') { o.ok = true; return; } const j = jobs.get(m.id); if (!j) return; jobs.delete(m.id); o.load--; done.push([j, m.t === 'rect' ? m.H : null, m.t === 'rect' ? m.C : null]); if (m.t === 'err') console.error('[grass worker]', m.msg); };
+      w.onmessage = (e) => { const m = e.data; if (m.t === 'ready') { o.ok = true; return; } const j = jobs.get(m.id); if (!j) return; jobs.delete(m.id); o.load--; workMs += m.ms || 0; done.push([j, m.t === 'rect' ? m.H : null, m.t === 'rect' ? m.C : null]); if (m.t === 'err') console.error('[grass worker]', m.msg); };
       w.postMessage({ t: 'init', data: S.data }); wk.push(o);
     }
   } catch (e) { console.warn('[grass] no worker', e); mainThread = true; }
-  const done = [];
+  const done = []; let workMs = 0;
   const md = (a, n) => ((a % n) + n) % n;
   function integrate(j, H, C) {
     const l = j.l, N = l.N;
@@ -121,6 +121,7 @@ export function createGrass(ctx, S) {
       attribute vec3 iPt; uniform vec2 uWind,uN,uFar; uniform float uGust,uTime,uD0,uPx; uniform vec4 uTornadoA[4]; uniform vec3 uCamP; varying vec3 vCol; varying float vT;
       uniform highp sampler2D uH0,uH1; uniform highp sampler2D uC0,uC1; uniform vec4 uWin0,uWin1;
       uint gS; float rn(){ gS=gS*747796405u+2891336453u; uint w=((gS>>((gS>>28u)+4u))^gS)*277803737u; w=(w>>22u)^w; return float(w>>8u)/16777216.; }
+      int ctz(int v){ if(v==0) return 12; int n=0; for(int i=0;i<12;i++){ if((v&1)!=0) break; v>>=1; n++; } return n; }
       bool inW(vec4 W,vec2 p){ vec2 f=p/W.w-W.xy; return f.x>=1.&&f.y>=1.&&f.x<W.z-2.&&f.y<W.z-2.; }
       float gH(highp sampler2D T,vec4 W,vec2 p){ vec2 f=p/W.w; vec2 i=floor(f),a=f-i; float N=W.z;
         float h00=texelFetch(T,ivec2(mod(i,N)),0).r,h10=texelFetch(T,ivec2(mod(i+vec2(1.,0.),N)),0).r,h01=texelFetch(T,ivec2(mod(i+vec2(0.,1.),N)),0).r,h11=texelFetch(T,ivec2(mod(i+vec2(1.),N)),0).r;
@@ -128,12 +129,12 @@ export function createGrass(ctx, S) {
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal=vec3(0.,1.,0.);')
       .replace('#include <begin_vertex>', `
       float st=exp2(iPt.z); vec2 Iw=iPt.xy+position.xy*st; ivec2 ii=ivec2(Iw);
-      int lx=ii.x==0?12:findLSB(ii.x), lz=ii.y==0?12:findLSB(ii.y); float lev=float(min(min(lx,lz),12));
+      float lev=float(min(ctz(ii.x),ctz(ii.y)));
       gS=uint(ii.x+1048576)*1664525u^(uint(ii.y+1048576)*1013904223u+374761393u); rn(); rn();
       float r0=rn(),r1=rn(),r2=rn(),r3=rn(),r4=rn(),r5=rn(),rnd=rn();
       vec2 p2=(Iw+(vec2(r0,r1)-.5)*exp2(min(lev,6.)))*${S0};
       float dc=length(p2-uCamP.xz); bool kill=false;
-      float L=log2(max(dc,uD0)/uD0); float wl=clamp((lev+.75*r2-L)*4.+1.,0.,1.);
+      float L=log2(max(dc,uD0)/uD0)*.85; float wl=clamp((lev+.75*r2-L)*4.+1.,0.,1.);
       float wn=clamp((smoothstep(uN.x,uN.y,dc)-r3*.8)*5.,0.,1.), wf=clamp((r4*.8+.2-smoothstep(uFar.x,uFar.y,dc))*5.,0.,1.);
       float wv=wl*wn*wf; vec2 hb=vec2(0.); vec4 cc=vec4(0.); float gy=0.;
       if(wv<=.002) kill=true;
@@ -167,7 +168,7 @@ export function createGrass(ctx, S) {
   function pickPatches(c) {
     ctx.camera.getWorldDirection(fw); const fl = Math.hypot(fw.x, fw.z), noCull = fl < .3, fx = fw.x / (fl || 1), fz = fw.z / (fl || 1);
     const cam = ctx.camera, hv = Math.atan(Math.tan((cam.fov || 70) * Math.PI / 360) * (cam.aspect || 1.78)), cosH = Math.cos(Math.min(Math.PI, hv + .12));
-    u.uPx.value = 2 * Math.tan((cam.fov || 70) * Math.PI / 360) / Math.max(300, (ctx.renderer?.domElement?.height || 900)) * 1.6;
+    u.uPx.value = 2 * Math.tan((cam.fov || 70) * Math.PI / 360) / Math.max(300, (ctx.renderer?.domElement?.height || 900)) * 2.1;
     for (const l of lods) l.n = 0;
     const pcx = Math.floor(c.x / P), pcz = Math.floor(c.z / P), D0 = N0, cpx = c.x, cpz = c.z;
     for (let j = -PR; j <= PR; j++) for (let i = -PR; i <= PR; i++) {
@@ -179,8 +180,10 @@ export function createGrass(ctx, S) {
     for (const l of lods) { l.m.geometry.instanceCount = l.n; l.m.visible = l.n > 0; if (l.n) { l.ia.clearUpdateRanges(); l.ia.addUpdateRange(0, l.n * 3); l.ia.needsUpdate = true; } }
   }
 
-  let lx = 1e9, lz = 1e9;
+  let lx = 1e9, lz = 1e9; const t0c = performance.now(); let tReady = 0;
+  group.userData.stats = () => ({ grassPatches: lods.map((l) => l.n), grassJobs: queue.length + jobs.size, grassReady: LV.map((l) => l.ready), bakeMs: tReady, workMs: Math.round(workMs), nW: wk.length, tiles: tiles.size, mainThread });
   return { group, update() {
+    if (!tReady && LV.every((l) => l.ready)) tReady = Math.round(performance.now() - t0c);
     const c = ctx.camera.position, cx = Math.floor(c.x / T), cz = Math.floor(c.z / T), rr = Math.ceil(RAD / T); camP.copy(c);
     for (const l of LV) { if (l.busy) continue; const nx = Math.floor(c.x / l.c) - l.N / 2, nz = Math.floor(c.z / l.c) - l.N / 2; if (!l.ready || Math.abs(nx - l.ox) >= l.hs || Math.abs(nz - l.oz) >= l.hs) shift(l, nx, nz, c.x, c.z); }
     pumpJobs();

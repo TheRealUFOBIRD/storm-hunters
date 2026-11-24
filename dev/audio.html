@@ -9,6 +9,7 @@ import { Core, Bank } from '../src/audio/core.js';
 import { SOUNDS, LOOPS, ORDER, thunder } from '../src/audio/dsp.js';
 import * as V from '../src/audio/voices.js';
 import { Music } from '../src/audio/music.js';
+import { Samples, MANIFEST } from '../src/audio/samples.js';
 const $ = (i) => document.getElementById(i), ctx = window.ctx = createContext($('game'));
 await loadSystems(ctx, ['audio']); ctx.state = 'playing';
 // ---- interactive scene
@@ -22,6 +23,7 @@ for (const t of Object.keys(ctx.vehicles.types)) btn($('sc'), t, () => { veh.typ
 for (const d of [60, 400, 1500, 5000, 12000]) btn($('sc'), 'thunder ' + d, () => ctx.events.emit('lightning', { x: d + 300, y: 1400, z: 0, tx: d, ty: 0, tz: 0, energy: 0.8, kind: 'cg', seed: Math.random() * 1e9 }));
 btn($('sc'), 'radio', () => ctx.audio.play('radio', { text: 'Tornado warning for Cleveland county, all units reposition south east immediately.' })); btn($('sc'), 'siren', () => ctx.audio.play('siren', { x: 300, z: 0, duration: 20 })); btn($('sc'), 'impact', () => ctx.events.emit('vehicle:impact', { v: veh, speed: 14 })); btn($('sc'), 'house breaks', () => ctx.events.emit('world:break', { kind: 'house', pos: { x: 20, y: 0, z: 20 } }));
 for (const n of ORDER) btn($('one'), n, () => ctx.audio.play(n));
+const h3 = document.createElement('h3'); h3.textContent = 'Recorded samples'; $('one').after(h3); const smp = document.createElement('div'); h3.after(smp); for (const n of Object.keys(MANIFEST)) if (!MANIFEST[n].loop) btn(smp, n, () => ctx.audio.play(n));
 let last = performance.now();
 function frame(t) {
   const dt = Math.max(0.001, (t - last) / 1000); last = t; T.x = 0; T.z = -S.dist; T.vmax = S.vmax; ctx.time.hour = S.hour; veh.speed = S.speed; veh.vel.set(0, 0, -S.speed); veh.throttle = S.thr; veh.rpm = 800 + (S.speed * 3.6 % 45) / 45 * 4200 * (S.speed > 0 ? 1 : 0) + (S.speed ? 0 : S.thr * 5000); for (const w of veh.wheels) { w.slip = S.slip; w.surface = S.surface; }
@@ -41,11 +43,13 @@ async function offline(sec, fn, names) {
   if (ac.audioWorklet) { await ac.audioWorklet.addModule('../src/audio/engine.worklet.js'); core.worklet = true; }
   await fn(core, ac); const t = performance.now(), b = await ac.startRendering(); const r = analyse(b); r.ms = performance.now() - t; r.sec = sec; return r;
 }
-const bank = new Bank();
+const bank = new Bank(); bank.samples = new Samples();
 window.verify = async () => {
-  const t0 = performance.now(); bank.sync(); console.log(`bank: ${bank.raw.size} sounds rendered in ${(performance.now() - t0) | 0} ms`); const bad = [];
+  const bad = []; const t0 = performance.now(); bank.sync(); const sr = await bank.samples.start(); console.log(`samples: ${sr.ok}/${sr.files} loaded, ${sr.failed.length} failed fetches ${sr.failed.join(' ')}`); if (sr.failed.length || sr.ok !== sr.files) bad.push('samples failed: ' + sr.failed.join(' ')); console.log(`bank: ${bank.raw.size} sounds rendered in ${(performance.now() - t0) | 0} ms`);
   const row = (n, r, o = {}) => { const f = []; if (r.bad) f.push('NaN'); if (r.peak > 1) f.push('CLIP'); if (r.rms < (o.min ?? 0.004) && !o.silent) f.push('INAUDIBLE'); if (o.silent && r.rms > o.silent) f.push('TOO LOUD'); if (f.length) bad.push(n + ' ' + f.join(',')); console.log(`${n.padEnd(34)} rms ${r.rms.toFixed(4)} peak ${r.peak.toFixed(3)} centroid ${Math.round(r.centroid)} Hz  lo/mid/hi ${r.bands}  ${r.ms !== undefined ? `cpu ${(r.ms / r.sec / 10).toFixed(1)}%` : ''} ${f.join(' ')}`); return r; };
   const raw = []; for (const n of ORDER) { const b = bank.get(n), r = analyse(b); if (r.bad || r.peak > 1 || r.rms < 0.003) { raw.push(n); bad.push('raw ' + n + ' peak ' + r.peak.toFixed(2) + ' rms ' + r.rms.toFixed(4)); } } console.log(`raw sounds: ${ORDER.length} checked, ${raw.length} bad ${raw.join(' ')}`);
+  const rawS = []; for (const [k, v] of bank.samples.buf) for (const x of v) { const r = analyse(x.b); if (r.bad || r.peak > 1 || r.rms < 0.002) rawS.push(k + ':' + x.f); } console.log(`raw samples: ${bank.samples.ok} checked, ${rawS.length} bad ${rawS.join(' ')}`); if (rawS.length) bad.push('raw samples ' + rawS.join(' '));
+  for (const k of ['thunderNear', 'thunderFar', 'impHuge', 'glassBreak', 'doorClose', 'starter', 'uiClick']) row('sample ' + k, await offline(k.startsWith('thunder') ? 8 : 3, (c) => { c.play(k, { gain: 0.8, to: c.bus.sfx }); }), { min: 0.001 });
   const tor = (o) => offline(6, (c) => { const v = new V.TornadoVoice(c); v.set({ x: 0, y: 0, z: -1, dist: 3000, vmax: 70, rCore: 90, dust: 0.9, ground: 1, ...o }); });
   for (const [n, o] of [['6 km EF3', { dist: 6000 }], ['3 km EF3', { dist: 3000 }], ['1 km EF3', { dist: 1000 }], ['300 m EF3', { dist: 300 }], ['inside EF3', { dist: 60 }], ['inside EF5 wedge', { dist: 200, vmax: 110, rCore: 400 }], ['300 m EF0 rope', { dist: 300, vmax: 32, rCore: 25 }]]) row('tornado ' + n, await tor(o));
   const l = await offline(4, (c, ac) => { const v = new V.TornadoVoice(c); v.set({ x: 1, y: -40, z: 0, dist: 900, vmax: 70, rCore: 90, dust: 1 }); }); void l;
@@ -55,7 +59,7 @@ window.verify = async () => {
   row('hail 5cm car', await offline(3, (c, ac) => { c.setInterior(1); const v = new V.RainVoice(c); for (let i = 0; i < 30; i++) for (let k = 0; k < 3; k++) c.play('hailCar' + (k % 6), { gain: 0.6, to: c.bus.weather, delay: i * 0.09 + k * 0.02 }); }));
   for (const [n, p] of [['noon plains', { hour: 12 }], ['night swamp', { hour: 22, biome: 'swamp' }], ['dusk corn', { hour: 20, biome: 'cornbelt' }]]) row('ambience ' + n, await offline(5, (c) => { const a = new V.AmbienceVoice(c); for (let i = 0; i < 200; i++) a.set({ dark: 0, threat: 0, wind: 2, rain: 0, speed: 0, wet: 0, biome: 'plains', ...p }, 0.05); }), { min: 0.002 });
   row('ambience hush (storm near)', await offline(4, (c) => { const a = new V.AmbienceVoice(c); a.calm = 0; a.next = 99; for (let i = 0; i < 20; i++) a.set({ dark: 0.9, threat: 0.9, wind: 20, rain: 0.5, hour: 12, speed: 0, wet: 0, biome: 'plains' }, 0.05); }), { silent: 0.01 });
-  for (const [t, d] of Object.entries(ctx.vehicles.types)) for (const [rpm, load] of [[750, 0], [2200, 0.5], [d.engine.red * 0.92, 1]]) row(`engine ${t} ${Math.round(rpm)} rpm load ${load}`, await offline(2.5, (c) => { new V.EngineVoice(c, V.engineSpec(d)).set(rpm, load, { gain: 0.8 }); }));
+  for (const [t, d] of Object.entries(ctx.vehicles.types)) for (const [rpm, load] of [[750, 0], [2200, 0.5], [d.engine.red * 0.92, 1]]) row(`engine ${t} ${Math.round(rpm)} rpm load ${load}`, await offline(2.5, (c) => { const e = new V.EngineVoice(c, V.engineSpec(d)); e.set(rpm, load, { gain: 0.8 }); e.se?.pump(2.5); }));
   row('engine fallback', await offline(2, (c) => { c.worklet = false; new V.EngineVoice(c, V.engineSpec({})).set(3000, 0.6, {}); }));
   for (const p of [{ surface: 'asphalt', speed: 30, slip: 0 }, { surface: 'asphalt', speed: 20, slip: 0.9 }, { surface: 'gravel', speed: 20, slip: 0.3 }, { surface: 'asphalt', speed: 30, wet: 1, slip: 0 }, { surface: 'grass', speed: 15, slip: 0.2 }]) row('tyres ' + JSON.stringify(p), await offline(3, (c) => new V.TyreVoice(c).set({ wet: 0, contact: 1, ...p })));
   row('siren 600 m', await offline(9, (c) => { const s = new V.SirenVoice(c); s.on = 1; s.set({ active: true, x: 600, y: 10, z: 0, dist: 600 }, 0.1); })); row('horn', await offline(2, (c) => new V.HornVoice(c).set(true, false))); row('drone', await offline(2, (c) => new V.DroneVoice(c).set(true, 0.6, { x: 0, y: 0, z: -2 }))); row('radar servo', await offline(3, (c) => new V.ServoVoice(c).set(true)));

@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import { L } from './textures.js';
 import { TERRAIN_COMMON } from './terrain.js';
-import { XS, YS, CROWN } from './sampler.js';
+import { XS, YS, CROWN, herm } from './sampler.js';
 export const SS = 512, SOX = -51200, SOZ = -32768, SGX = 200, SGZ = 128;
 
 export function createRoadMaterial(ctx, tex, shared, far) {
@@ -11,7 +11,7 @@ export function createRoadMaterial(ctx, tex, shared, far) {
   m.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, { uGA: { value: tex.gA.texture }, uGN: { value: tex.gN.texture }, uWetness: ctx.globals.uWetness, uRain: ctx.globals.uRain, uTime: ctx.globals.uTime, uBioA: shared.uBioA, uBioB: shared.uBioB, uDmg: shared.uDmg, uDmgOrg: shared.uDmgOrg, uSec: shared.uSec });
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\n attribute vec4 aRd; varying vec4 vRd; varying vec3 vWp; varying vec3 vWn;')
-      .replace('#include <project_vertex>', `vec4 mvPosition=viewMatrix*(modelMatrix*vec4(transformed,1.)); float dd=length(mvPosition.xyz); mvPosition.xyz*=1.-clamp((dd-25.)/2600.,0.,1.)*${far ? '.035' : '.022'}; gl_Position=projectionMatrix*mvPosition; vRd=aRd; vWp=(modelMatrix*vec4(transformed,1.)).xyz; vWn=normal;`);
+      .replace('#include <project_vertex>', `vec4 wq=modelMatrix*vec4(transformed,1.); float dd0=length(wq.xyz-cameraPosition); wq.y+=clamp((dd0-250.)/1800.,0.,1.)*.45; vec4 mvPosition=viewMatrix*wq; float dd=length(mvPosition.xyz); mvPosition.xyz*=1.-(3.-min(aRd.z,3.))*4e-5; mvPosition.xyz*=1.-clamp((dd-25.)/2600.,0.,1.)*${far ? '.035' : '.022'}; gl_Position=projectionMatrix*mvPosition; vRd=aRd; vWp=(modelMatrix*vec4(transformed,1.)).xyz; vWn=normal;`);
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
       precision highp sampler2DArray; precision highp usampler2D; uniform sampler2DArray uGA,uGN; uniform float uWetness,uRain,uTime; varying vec4 vRd; varying vec3 vWp; varying vec3 vWn; ${TERRAIN_COMMON}
       vec3 tN; float tR; float hs(float n){ return fract(sin(n*91.17)*43758.5453); } float hs2(vec2 p){ return fract(sin(dot(p,vec2(41.3,289.1)))*43758.5453); }
@@ -69,10 +69,10 @@ export function createRoads(ctx, S, tex, shared) {
   let P = [], A = [], NR = [], IX = [];
   function emit(i) {
     const r = roads[seg.R[i]], q = seg.I[i], p = r.pts, k = r.k, xs = XS[k], ys = YS[k], m = xs.length; tan(r, q, T0); tan(r, q + 1, T1); const ax = p[q * 2], az = p[q * 2 + 1], bx = p[q * 2 + 2], bz = p[q * 2 + 3], ya = r.y[q], yb = r.y[q + 1], s0 = r.s[q], s1 = r.s[q + 1];
-    const sub = k === 2 ? 4 : 3, base = P.length / 3; const dy = (yb - ya) / Math.max(1, s1 - s0);
+    const sub = k === 2 ? 4 : 3, base = P.length / 3, L = Math.max(1, s1 - s0), m0 = r.m[q] * L, m1 = r.m[q + 1] * L, sk = k === 2 && r.blk ? 132 / r.blk : 1; // streets: s scaled so intersections fall on the shader's 132 m grid
     for (let t = 0; t <= sub; t++) {
-      const f = t / sub, x = ax + (bx - ax) * f, z = az + (bz - az) * f, y = ya + (yb - ya) * f; let tx = T0.x + (T1.x - T0.x) * f, tz = T0.z + (T1.z - T0.z) * f; const l = Math.sqrt(tx * tx + tz * tz); tx /= l; tz /= l; const s = s0 + (s1 - s0) * f;
-      for (let c = 0; c < m; c++) { const u = xs[c], X = x - tz * u, Z = z + tx * u; P.push(X, y - .018 * Math.min(Math.abs(u), r.hw) + ys[c], Z); const sl = k < 2 && Math.abs(u) > .1 ? Math.sign(u) * .018 : 0; NR.push(-tz * sl - tx * dy, 1, tx * sl - tz * dy); A.push(u, s, k, S.otherEdge(X, Z, r.id)); }
+      const f = t / sub, x = ax + (bx - ax) * f, z = az + (bz - az) * f, y = herm(ya, yb, m0, m1, f), dy = (6 * (f * f - f) * (ya - yb) + (3 * f * f - 4 * f + 1) * m0 + (3 * f * f - 2 * f) * m1) / L; let tx = T0.x + (T1.x - T0.x) * f, tz = T0.z + (T1.z - T0.z) * f; const l = Math.sqrt(tx * tx + tz * tz); tx /= l; tz /= l; const s = s0 + (s1 - s0) * f;
+      for (let c = 0; c < m; c++) { const u = xs[c], X = x - tz * u, Z = z + tx * u; P.push(X, y - CROWN * Math.min(Math.abs(u), r.hw) + ys[c], Z); const sl = k < 2 && Math.abs(u) > .1 && Math.abs(u) <= r.hw ? Math.sign(u) * CROWN : 0; NR.push(-tz * sl - tx * dy, 1, tx * sl - tz * dy); A.push(u, s * sk, k, S.otherEdge(X, Z, r.id)); }
       if (t) for (let c = 0; c + 1 < m; c++) { const b = base + (t - 1) * m + c; IX.push(b, b + 1, b + m, b + 1, b + m + 1, b + m); }
     }
     if (seg.B[i]) bridge(r, ax, az, ya, bx, bz, yb, T0, T1, s0, s1);
@@ -88,8 +88,8 @@ export function createRoads(ctx, S, tex, shared) {
   const live = new Map(); let job = null; const R = 2600;
   const keyList = []; let lastC = -1;
   function buildSector(k) { const e = cnt[k + 1]; if (cnt[k] === e) { live.set(k, null); return; } const i = k % SGX, j = (k / SGX) | 0, ox = SOX + (i + .5) * SS, oz = SOZ + (j + .5) * SS; job = { k, q: cnt[k], e, ox, oz }; }
-  // far ribbon: all majors, every 3rd point
-  { for (const r of roads) { if (r.k > 1) continue; const p = r.pts, n = p.length / 2, hw = r.hw; let prev = -1; for (let q = 0; ; q += 3) { const i = Math.min(q, n - 1); tan(r, i, T0); const b = P.length / 3; for (const u of [-hw, 0, hw]) { P.push(p[i * 2] - T0.z * u, r.y[i] + .25, p[i * 2 + 1] + T0.x * u); NR.push(0, 1, 0); A.push(u, r.s[i], r.k, 99); } if (prev >= 0) IX.push(prev, prev + 1, b, prev + 1, b + 1, b, prev + 1, prev + 2, b + 1, prev + 2, b + 2, b + 1); prev = b; if (i === n - 1) break; } } const g = mkGeo(0, 0), mesh = new THREE.Mesh(g, matFar); mesh.frustumCulled = false; mesh.receiveShadow = false; mesh.renderOrder = 1; group.add(mesh); }
+  // far ribbon: all majors, every 2nd point, lifted (only drawn beyond 2.3 km, where terrain LODs are coarse)
+  { for (const r of roads) { if (r.k > 1) continue; const p = r.pts, n = p.length / 2, hw = r.hw; let prev = -1; for (let q = 0; ; q += 2) { const i = Math.min(q, n - 1); tan(r, i, T0); const b = P.length / 3; for (const u of [-hw, 0, hw]) { P.push(p[i * 2] - T0.z * u, r.y[i] + .7, p[i * 2 + 1] + T0.x * u); NR.push(0, 1, 0); A.push(u, r.s[i], r.k, 99); } if (prev >= 0) IX.push(prev, prev + 1, b, prev + 1, b + 1, b, prev + 1, prev + 2, b + 1, prev + 2, b + 2, b + 1); prev = b; if (i === n - 1) break; } } const g = mkGeo(0, 0), mesh = new THREE.Mesh(g, matFar); mesh.frustumCulled = false; mesh.receiveShadow = false; mesh.renderOrder = 1; group.add(mesh); }
   function update(budget) {
     const c = ctx.camera.position, t0 = performance.now();
     if (job) { while (job.q < job.e && performance.now() - t0 < budget) { for (let n = 0; n < 6 && job.q < job.e; n++) emit(ref[job.q++]); } if (job.q >= job.e) { const g = mkGeo(job.ox, job.oz); g.computeBoundingSphere(); const m = new THREE.Mesh(g, mat); m.position.set(job.ox, 0, job.oz); m.receiveShadow = true; m.renderOrder = 2; m.matrixAutoUpdate = false; m.updateMatrix(); group.add(m); live.set(job.k, m); job = null; } return; }

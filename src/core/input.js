@@ -13,13 +13,19 @@ export function createInput(canvas) {
   // A connected-but-idle controller (or a wheel/pedal set reporting a non-zero rest value) must never feed
   // throttle/brake/steer while the player uses the keyboard: pad values only count after the pad is actually used,
   // measured against the values it reported when first seen.
-  let padBase = null, padId = '';
+  // Some pads report garbage/zeros on the first polls before their real rest values arrive, so the baseline keeps
+  // re-settling for ~0.5 s, and a deviation must persist for several polls before the pad takes over.
+  let padBase = null, padId = '', settle = 0, streak = 0;
   const padActive = () => I.usingPad && I.pad;
   const padMoved = (p) => {
-    if (!padBase || padId !== p.id) { padId = p.id; padBase = { a: [...p.axes], b: p.buttons.map((b) => b.value) }; return false; }
-    for (let i = 0; i < p.axes.length; i++) if (Math.abs(p.axes[i] - (padBase.a[i] ?? 0)) > 0.35) return true;
-    for (let i = 0; i < p.buttons.length; i++) if (Math.abs(p.buttons[i].value - (padBase.b[i] ?? 0)) > 0.35) return true;
-    return false;
+    const snap = () => { padBase = { a: [...p.axes], b: p.buttons.map((b) => b.value) }; };
+    if (!padBase || padId !== p.id) { padId = p.id; snap(); settle = 30; streak = 0; return false; }
+    if (settle > 0) { settle--; snap(); return false; }
+    let dev = false;
+    for (let i = 0; i < p.axes.length && !dev; i++) if (Math.abs(p.axes[i] - (padBase.a[i] ?? 0)) > 0.35) dev = true;
+    for (let i = 0; i < p.buttons.length && !dev; i++) if (Math.abs(p.buttons[i].value - (padBase.b[i] ?? 0)) > 0.35) dev = true;
+    streak = dev ? streak + 1 : 0;
+    return streak >= 4;
   };
   const I = {
     uiBlock: false, captured: false, mouse: { dx: 0, dy: 0, wheel: 0, left: false, right: false, leftPressed: false, rightPressed: false, x: 0, y: 0 }, pad: null, usingPad: false,

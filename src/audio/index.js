@@ -1,9 +1,11 @@
-// ctx.audio - procedural audio. Everything is synthesised; see dsp.js (one-shots/loops), voices.js (continuous), music.js.
+// ctx.audio - recorded CC0 samples (samples.js / manifest.js, lazily loaded after the first gesture) layered over / replacing the
+// procedural sounds (dsp.js one-shots/loops, voices.js continuous, music.js), which remain the fallback when a file fails to load.
 import * as THREE from 'three';
 import { Core, Bank, Par, clamp, lerp, sstep } from './core.js';
 import { TornadoVoice, WindVoice, RainVoice, AmbienceVoice, EngineVoice, TyreVoice, SirenVoice, HornVoice, DroneVoice, ServoVoice, engineSpec } from './voices.js';
 import { Music } from './music.js';
 import { SOUNDS } from './dsp.js';
+import { Samples } from './samples.js';
 
 const MAX_TORNADO = 2, MAX_SIREN = 2, MAX_REMOTE = 2, STEP = 1 / 30;
 // public names (other modules) -> bank sound(s)
@@ -16,9 +18,9 @@ export async function create(ctx) {
   const bank = new Bank(), ev = ctx.events, offs = [], on = (n, f) => offs.push(ev.on(n, f)), R = Math.random;
   let ac = null, core = null, music = null, unlocked = false, starting = null, acc = 0, muted = false;
   let wind, rain, amb, tyre, horn, drone, servo, rHorn, remoteDrone; const tors = [], sirens = [], engines = new Map(); let engine = null, engineFor = null;
-  const cam = ctx.camera, F = new THREE.Vector3(), U = new THREE.Vector3(), W = new THREE.Vector3(), prevCam = new THREE.Vector3(), camVel = new THREE.Vector3(); let havePrev = false, wx = null, wxT = 0, cityT = 0, sirenList = [], forced = [], prevMode = null, prevVeh = null, lastGear = 0, lastThr = 0, susp = [0, 0, 0, 0], thumpT = 0, wipeT = 0, heartT = 0, scanT = 0, scanQ = 0, scanAt = -9, stepT = 0, thrEnv = 0, startT = 0, popT = 0, threat = 0, closing = 0, lastDist = 1e9, squelch = null, talkT = 0, talkEnd = 0, hid = false, dtv = 0, indT = 0, wasAnch = false, menuFade = 0, talkPitch = 1;
+  const cam = ctx.camera, F = new THREE.Vector3(), U = new THREE.Vector3(), W = new THREE.Vector3(), prevCam = new THREE.Vector3(), camVel = new THREE.Vector3(); let havePrev = false, wx = null, wxT = 0, cityT = 0, sirenList = [], forced = [], prevMode = null, prevVeh = null, debrisT = 0, lastGear = 0, lastThr = 0, susp = [0, 0, 0, 0], thumpT = 0, wipeT = 0, heartT = 0, scanT = 0, scanQ = 0, scanAt = -9, stepT = 0, thrEnv = 0, startT = 0, popT = 0, threat = 0, closing = 0, lastDist = 1e9, squelch = null, talkT = 0, talkEnd = 0, hid = false, dtv = 0, indT = 0, wasAnch = false, menuFade = 0, talkPitch = 1;
   const rel = { x: 0, y: 0, z: 0 }, relTo = (p) => ({ x: p.x - cam.position.x, y: p.y - cam.position.y, z: p.z - cam.position.z });
-  bank.start();
+  bank.start(); const samples = bank.samples = new Samples();
 
   async function build() {
     const AC = globalThis.AudioContext || globalThis.webkitAudioContext; if (!AC) return false;
@@ -30,7 +32,7 @@ export async function create(ctx) {
     get context() { return ac; }, get core() { return core; }, get unlocked() { return unlocked; }, get threat() { return threat; }, bank,
     unlock() {
       if (unlocked && ac?.state === 'running') return Promise.resolve(true); if (starting) { ac?.resume?.().catch(() => {}); return starting; }
-      starting = (async () => { try { if (!ac && !(await build())) return false; await Promise.race([ac.resume(), new Promise((r) => setTimeout(r, 1500))]); unlocked = ac.state === 'running'; if (unlocked && SILENT_IOS()) { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(); } return unlocked; } catch (e) { console.warn('[audio] unavailable', e?.message || e); return false; } finally { starting = null; } })();
+      starting = (async () => { try { if (!ac && !(await build())) return false; await Promise.race([ac.resume(), new Promise((r) => setTimeout(r, 1500))]); unlocked = ac.state === 'running'; if (unlocked) samples.start(); if (unlocked && SILENT_IOS()) { const s = ac.createBufferSource(); s.buffer = ac.createBuffer(1, 1, 22050); s.connect(ac.destination); s.start(); } return unlocked; } catch (e) { console.warn('[audio] unavailable', e?.message || e); return false; } finally { starting = null; } })();
       return starting;
     },
     setVolume(b, v) { if (!core) return; v = clamp(+v || 0, 0, 1.5); if (b in core.vol) { core.vol[b] = v; core.applyVolumes(); } },
@@ -38,12 +40,12 @@ export async function create(ctx) {
     // name: ALIAS or bank name. opts {x,y,z | pos (world), gain|volume, rate, bus, delay, pan}
     play(name, o = {}) {
       if (!core || !unlocked) return null; if (name === 'radio') return radio(o.text); if (name === 'siren') { forced.push({ x: o.x ?? cam.position.x, z: o.z ?? cam.position.z, until: ctx.time.real + (o.duration || 60) }); return null; }
-      const a = ALIAS[name], n = a ? a[0] : SOUNDS[name] ? name : null; if (!n) { if (!api['_w' + name]) { api['_w' + name] = 1; console.warn('[audio] unknown sound', name); } return null; }
+      const a = ALIAS[name], n = a ? a[0] : SOUNDS[name] || samples.m[name] ? name : null; if (!n) { if (!api['_w' + name]) { api['_w' + name] = 1; console.warn('[audio] unknown sound', name); } return null; }
       const p = o.pos || (o.x !== undefined && o.z !== undefined ? o : null);
       return core.play(n, { gain: (o.gain ?? o.volume ?? 1) * (a ? a[1] : 0.8), rate: o.rate, vary: o.vary, delay: o.delay, pan: o.pan, pos: p ? relTo({ x: p.x, y: p.y ?? cam.position.y, z: p.z }) : null, to: p ? core.outside : core.bus[o.bus || (a ? a[2] : 'sfx')] || core.bus.sfx, send: p ? 0.15 : 0, min: 0.06, prio: true });
     },
     update, dispose() { for (const f of offs) f(); ac?.close?.(); },
-    debug: () => ({ state: ac?.state, worklet: core?.worklet, voices: core?.voices, thunders: core?.thunders || 0, threat: +threat.toFixed(3), bank: bank.raw.size, tornado: tors.map((t) => +(t.level || 0).toFixed(3)), interior: core?.interior, calm: amb?.calm, sirens: sirens.map((s) => +s.on.toFixed(2)), reduction: core?.lim.reduction }),
+    debug: () => ({ state: ac?.state, worklet: core?.worklet, voices: core?.voices, thunders: core?.thunders || 0, threat: +threat.toFixed(3), bank: bank.raw.size, tornado: tors.map((t) => +(t.level || 0).toFixed(3)), interior: core?.interior, samples: { ok: samples.ok, files: samples.files, failed: samples.failed.length, done: samples.done }, calm: amb?.calm, sirens: sirens.map((s) => +s.on.toFixed(2)), reduction: core?.lim.reduction }),
   };
   const SILENT_IOS = () => /iP(hone|ad)/.test(navigator.userAgent);
   const gesture = () => { api.unlock().then((ok) => { if (ok) for (const n of ['pointerdown', 'keydown', 'touchend']) removeEventListener(n, gesture, true); }); };
@@ -114,6 +116,7 @@ export async function create(ctx) {
       let t = i ? n2 : n1; const cur = tors[i]; if (cur && cur.t !== t && i === 0 && tors[1]?.t === t && t) { tors[0] = tors[1]; tors[1] = cur; } const q = tors[i]; const D = t ? Math.hypot(t.x - cp.x, t.z - cp.z) : 1e9;
       if (t && D < 9000) { const o = q || (tors[i] = new TornadoVoice(core)); o.t = t; o.idle = 0; const gr = t.onGround === false ? 0.25 : 0.25 + 0.75 * clamp(t.condense ?? 1, 0, 1) * (t.stage === 'funnel' ? 0.4 : 1); o.set({ x: t.x - cp.x, y: (t.y0 || 0) - cp.y, z: t.z - cp.z, dist: D, vmax: t.vmax || 40, rCore: t.rCore || 60, dust: t.dust, ground: gr, strength: 1 }); } else if (q) { q.t = null; q.mute(); q.idle += dt; if (q.idle > 8) { q.dispose(); tors[i] = null; } }
     }
+    debrisT -= dt; if (n1 && !menu && !paused && debrisT <= 0) { const dd = Math.hypot(n1.x - cp.x, n1.z - cp.z) - (n1.rCore || 60), k = 1 - clamp(dd / 650); debrisT = 0.12 + 0.9 * R() * (1.2 - k); if (k > 0 && (n1.onGround !== false) && (n1.vmax || 40) > 35) { const a = R() * 6.283, rr = (n1.rCore || 60) * (0.6 + 0.9 * R()), p = { x: n1.x + Math.cos(a) * rr - cp.x, y: 2 + 25 * R() - cp.y + (n1.y0 || 0), z: n1.z + Math.sin(a) * rr - cp.z }, q = R(), nm = q < 0.4 ? 'impact0' : q < 0.62 ? 'crack' : q < 0.8 ? 'metalBang' : q < 0.92 ? 'impact1' : 'glass0'; snd(nm, { gain: (0.35 + 0.65 * R()) * k, pos: p, ref: 28, vary: 0.2, to: core.weather, send: 0.2 }); } }
     const D1 = n1 ? Math.max(0, Math.hypot(n1.x - cp.x, n1.z - cp.z) - (n1.rCore || 60)) : 1e9; if (n1 && lastDist < 1e8) closing += (clamp((lastDist - D1) / dt, -60, 60) - closing) * Math.min(1, dt * 0.7); else closing = 0; lastDist = D1;
     const want = n1 && !menu ? clamp(Math.pow(1 - clamp((D1 - 120) / 4200), 1.5) * (0.75 + 0.25 * clamp((n1.vmax || 40) / 80)) + clamp(closing / 40, -0.1, 0.2) * sstep(4000, 500, D1)) * (n1.onGround === false ? 0.6 : 1) : 0; threat += (want - threat) * Math.min(1, dt * 1.2);
     heartT -= dt; if (D1 < 420 && !menu && !paused && heartT <= 0) { const k = 1 - D1 / 420; heartT = lerp(0.95, 0.46, k); core.play('heart', { gain: 0.15 + 0.55 * k, to: core?.bus.sfx, rate: lerp(1, 1.15, k) }); }

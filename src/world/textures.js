@@ -1,7 +1,7 @@
 // GPU generated tiling PBR texture arrays.  albedo array: rgb = sqrt(linear albedo), a = height.  normal array: rg = normal xy, b = roughness, a = ao
 import * as THREE from 'three';
 export const L = { grass: 0, dry: 1, dirt: 2, plowed: 3, gravel: 4, sand: 5, rock: 6, snow: 7, forest: 8, crop: 9, asphalt: 10, concrete: 11, wheat: 12, count: 13 };
-export const BL = { siding: 0, planks: 1, brick: 2, stucco: 3, corrugated: 4, shingle: 5, concrete: 6, curtain: 7, wood: 8, bark: 9, pinebark: 10, stone: 11, paint: 12, block: 13, tar: 14, rust: 15, glass: 16, office: 17, count: 18 };
+export const BL = { siding: 0, planks: 1, brick: 2, stucco: 3, corrugated: 4, shingle: 5, concrete: 6, curtain: 7, wood: 8, bark: 9, pinebark: 10, stone: 11, paint: 12, block: 13, tar: 14, rust: 15, glass: 16, office: 17, brickN: 18, bay: 19, curt: 20, store: 21, hwin: 22, garage: 23, park: 24, turf: 25, aptw: 26, count: 27 };
 
 const COMMON = /* glsl */`
 precision highp float; precision highp int; varying vec2 vUv; uniform float uSize;
@@ -86,8 +86,26 @@ void mat(int L,vec2 uv,out vec3 c,out float h,out float r){
  { h=.5+(fine-.5)*.5; c=mix(vec3(.12,.055,.03),vec3(.33,.16,.08),mid*.8+fine*.3); c=mix(c,vec3(.36,.35,.33),smoothstep(.56,.5,big)*.5); r=.8; }
 #elif LAY==16
  { h=.5; c=vec3(.018,.024,.028); r=.05; }
-#else
+#elif LAY==17
  { vec2 p=uv*vec2(6.,6.),f=fract(p); float w=smoothstep(.18,.2,f.x)*smoothstep(.82,.8,f.x)*smoothstep(.22,.24,f.y)*smoothstep(.8,.78,f.y); float fr=smoothstep(.15,.17,f.x)*smoothstep(.85,.83,f.x)*smoothstep(.19,.21,f.y)*smoothstep(.83,.81,f.y); float id=h1(floor(p),6.,3.); h=.7-w*.6; c=mix(vec3(.5,.47,.43)*(.85+.2*streak),vec3(.2,.2,.2),fr-w); c=mix(c,vec3(.025,.035,.042)*(.6+.8*id),w); r=mix(.85,.07,w); }
+#elif LAY==18
+ { vec2 p=uv*vec2(12.,32.); p.x+=mod(floor(p.y),2.)*.5; vec2 f=fract(p); float id=h1(floor(mod(p,vec2(12.,32.))),999.,3.); float m=smoothstep(.0,.05,f.x)*smoothstep(1.,.95,f.x)*smoothstep(0.,.12,f.y)*smoothstep(1.,.88,f.y); h=.3+m*.5+fine*.2; vec3 bk=vec3(.62)*(.78+.4*id)*(.82+.36*fine); c=mix(vec3(.72,.7,.66),bk,m); r=.88; }
+#elif LAY==19
+ { vec2 f=fract(uv); float gl=smoothstep(.06,.075,f.x)*smoothstep(.94,.925,f.x)*smoothstep(.3,.315,f.y)*smoothstep(.94,.925,f.y); float mu=1.-smoothstep(.0,.012,abs(f.x-.5)); float id=h1(floor(uv),64.,7.); vec3 g=mix(vec3(.04,.05,.06),vec3(.1,.12,.14),id*.7+fine*.2); g=mix(g,vec3(.6,.6,.58),smoothstep(.55,.9,id)*.25); c=mix(vec3(.68,.67,.64)*(.9+.12*streak),g,gl); c=mix(c,vec3(.3),mu*gl); h=mix(.6,.04,gl*(1.-mu))+fine*.05; r=mix(.75,.06,gl); }
+#elif LAY==20
+ { vec2 f=fract(uv); float mx=max(smoothstep(.04,.0,f.x),smoothstep(.96,1.,f.x)); float my=max(smoothstep(.035,.0,f.y),smoothstep(.965,1.,f.y)); float spd=step(f.y,.18); float mu=max(mx,my); float id=h1(floor(uv),64.,9.); vec3 g=vec3(.11,.13,.15)*(.75+.5*id); c=mix(g,vec3(.2,.21,.22),spd*.8); c=mix(c,vec3(.55,.56,.57),mu); h=mix(.06,.5,max(mu,spd)); r=mix(.035,.3,mu); }
+#elif LAY==21
+ { vec2 f=fract(uv); float gl=smoothstep(.04,.05,f.x)*smoothstep(.96,.95,f.x)*smoothstep(.16,.17,f.y)*smoothstep(.72,.71,f.y); float tr=smoothstep(.04,.05,f.x)*smoothstep(.96,.95,f.x)*smoothstep(.77,.78,f.y)*smoothstep(.94,.93,f.y); float id=h1(floor(uv),64.,5.); vec3 inside=mix(vec3(.05,.045,.04),vec3(.22,.17,.12),id*fb(uv*vec2(1.,.5),6.,8.)); c=mix(vec3(.16,.15,.14),inside,gl); c=mix(c,vec3(.06,.07,.08),tr); h=mix(.55,.03,max(gl,tr)); r=mix(.5,.05,max(gl,tr)); }
+#elif LAY==22
+ { vec2 f=uv; float fr=1.-smoothstep(.07,.09,min(min(f.x,1.-f.x),min(f.y,1.-f.y))); float mn=max(1.-smoothstep(.012,.025,abs(f.x-.5)),1.-smoothstep(.012,.025,abs(f.y-.52))); vec3 g=mix(vec3(.035,.04,.045),vec3(.16,.17,.18),smoothstep(.2,1.,f.y+f.x*.3)*.6); float cur=step(.5,h1(vec2(floor(uv*7.)),7.,3.))*0.; c=mix(g,vec3(.9,.9,.88),max(fr,mn)); h=mix(.03,.6,max(fr,mn)); r=mix(.05,.5,max(fr,mn)); }
+#elif LAY==23
+ { vec2 f=uv; float pn=fract(f.y*4.); float gr=smoothstep(.0,.06,pn)*smoothstep(1.,.94,pn); float fr=1.-smoothstep(.02,.04,min(min(f.x,1.-f.x),1.-f.y)); h=.35+gr*.35+fine*.05; c=vec3(.88,.88,.86)*(.75+.25*gr)*(.95+.08*mid); c=mix(c,vec3(.6),fr); r=.55; }
+#elif LAY==24
+ { vec3 w=wor(uv*.5,40.,3.); float ln=smoothstep(.06,.04,abs(fract(uv.x)-.0)-.0)+smoothstep(.06,.04,abs(fract(uv.x)-1.)); ln*=step(.08,fract(uv.y))*step(fract(uv.y),.92); h=.4+(fine-.5)*.2; c=mix(vec3(.075,.075,.078),vec3(.13,.128,.125),mid)*(.85+.3*fine); c=mix(c,vec3(.12,.11,.1)*.7,smoothstep(.6,.75,big)*.5); c=mix(c,vec3(.8,.8,.76),ln*.9); r=mix(.88,.6,ln); }
+#elif LAY==25
+ { float st=step(.5,fract(uv.x*.5)); float ln=smoothstep(.03,.0,abs(fract(uv.x)-.5)); h=.5+(fine-.5)*.3; c=mix(vec3(.11,.2,.06),vec3(.14,.25,.08),st)*(.85+.3*fine); c=mix(c,vec3(.85),ln); r=.9; }
+#else
+ { vec2 p=uv*vec2(12.,30.); p.x+=mod(floor(p.y),2.)*.5; vec2 f=fract(p); float id=h1(floor(mod(p,vec2(12.,30.))),999.,3.); float m=smoothstep(.0,.05,f.x)*smoothstep(1.,.95,f.x)*smoothstep(0.,.12,f.y)*smoothstep(1.,.88,f.y); vec3 bk=vec3(.62)*(.78+.4*id)*(.82+.36*fine); c=mix(vec3(.72,.7,.66),bk,m); vec2 q=fract(uv); float gl=smoothstep(.29,.3,q.x)*smoothstep(.71,.7,q.x)*smoothstep(.25,.26,q.y)*smoothstep(.8,.79,q.y); float sill=smoothstep(.27,.28,q.x)*smoothstep(.73,.72,q.x)*smoothstep(.2,.21,q.y)*smoothstep(.25,.24,q.y); float mn=1.-smoothstep(.006,.014,abs(q.y-.55)); c=mix(c,vec3(.75,.74,.7),sill); c=mix(c,mix(vec3(.04,.045,.05),vec3(.8),mn),gl); h=mix(.3+m*.5,.04,gl*(1.-mn)); r=mix(.88,.06,gl); }
 #endif
 }`;
 const MAIN = /* glsl */`

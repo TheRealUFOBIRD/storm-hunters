@@ -6,6 +6,7 @@ import { createTextures, dataTex } from './textures.js';
 import { createTerrain, createTerrainMaterial, snowUniform } from './terrain.js';
 import { createRoads } from './roadmesh.js';
 import { createScatter } from './scatter.js';
+import { createBuildings } from './buildings.js';
 import { createWater } from './water.js';
 import { createGrass } from './grass.js';
 import { makeRouter } from './route.js';
@@ -33,6 +34,7 @@ export async function create(ctx) {
   const lines = data.roads.filter((r) => r.k <= 1).map((r) => ({ kind: r.kind, name: r.name, width: r.hw * 2, pts: r.pts }));
   const bounds = { ...BOUNDS }, surf = { type: 'grass', grip: .7, wetGrip: .5, rollRes: .035, bump: .03, dust: .35 }, nv = new THREE.Vector3();
   let mapCanvas = null; const breakQ = [];
+  const city = createBuildings(ctx, S, scatter, tex, data); // CITIES
   scatter.listeners.onBreak = (code) => breakQ.push(code);
   if (ctx.renderer) tex.fill(ctx.renderer);
 
@@ -62,7 +64,7 @@ export async function create(ctx) {
   function recentre(cx, cz) { const nx = Math.round((cx - DM * DR / 2) / 256) * 256, nz = Math.round((cz - DM * DR / 2) / 256) * 256; if (Math.abs(nx - dorg.x) < 1200 && Math.abs(nz - dorg.y) < 1200) return; const di = Math.round((nx - dorg.x) / DR), dj = Math.round((nz - dorg.y) / DR), old = dmask.slice(); dmask.fill(0); for (let j = 0; j < DM; j++) { const sj = j + dj; if (sj < 0 || sj >= DM) continue; for (let i = 0; i < DM; i++) { const si = i + di; if (si >= 0 && si < DM) dmask[j * DM + i] = old[sj * DM + si]; } } dorg.x = nx; dorg.y = nz; dDirty = 1; }
   let dmT = 0;
   const w = {
-    S, data, bounds, cities: data.cities, stats: () => ({ ...terrain.stats(), ...roads.stats(), ...scatter.stats(), pool: pool.size }),
+    S, data, bounds, cities: data.cities, stats: () => ({ ...terrain.stats(), ...roads.stats(), ...scatter.stats(), ...city.stats(), pool: pool.size }),
     heightAt: S.heightAt, terrainAt: S.terrainAt,
     normalAt(x, z, o = nv) { const e = 1; return o.set(S.heightAt(x - e, z) - S.heightAt(x + e, z), 2 * e, S.heightAt(x, z - e) - S.heightAt(x, z + e)).normalize(); },
     surfaceAt, biomeAt, waterLevelAt: S.waterLevelAt, isLand: (x, z) => S.waterLevelAt(x, z) === -Infinity, stateAt: S.stateAt,
@@ -75,7 +77,7 @@ export async function create(ctx) {
     ready: null, prewarm(x, z) { return new Promise((res) => { const s0 = performance.now(), cam = ctx.camera.position, sv = cam.clone(); const tick = () => { cam.set(x, S.heightAt(x, z) + 2, z); try { w.update(.016); } catch (e) { console.error(e); } cam.copy(sv); if ((terrain.idle() && roads.near(x, z) && scatter.near(x, z) && grass.idle?.()) || performance.now() - s0 > 15000) res(); else setTimeout(tick, 4); }; tick(); }); },
     update(dt = .016) {
       if (ctx.renderer && !tex.done) tex.fill(ctx.renderer);
-      pool.pump(3); terrain.update(); roads.update(2); scatter.update(dt); water.update(); grass.update();
+      pool.pump(3); terrain.update(); roads.update(2); scatter.update(dt); city.update(dt); water.update(); grass.update();
       const T = ctx.storms?.tornadoes; const c = ctx.camera.position; recentre(c.x, c.z);
       if (T && T.length) { scatter.damage(T, ctx.storms.isAuthority !== false); for (const t of T) if (t && (t.stage === 'touchdown' || t.stage === 'mature' || t.stage === 'shrinking' || t.stage === 'rope') && (t.condense ?? 1) > .2) stamp(t); }
       if (breakQ.length) { ctx.events.emit('world:breakIds', breakQ.splice(0)); }

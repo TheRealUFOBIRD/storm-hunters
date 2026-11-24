@@ -25,7 +25,7 @@ uniform vec4 uDepthK,uXf,uCsXf; uniform vec2 uRes,uJit; uniform mat4 uInvVP; uni
 uniform float uTime,uFrame,uGround,uTop,uPix,uQual,uStormDark,uMode,uRainSig; uniform int uSteps,uLSteps; uniform vec2 uDrift;
 uniform vec4 uFlash[4]; uniform vec3 uFlashCol; uniform int uNF; uniform vec4 uClip; // camera-inside hints
 const float MAXD=46000.;
-float Bz;
+float Bz; float gFp=1.; // pixel footprint (m) at the current sample: fades sub-pixel erosion that would only read as foam
 vec2 rot2(vec2 v,float a){ float c=cos(a),s=sin(a); return vec2(c*v.x-s*v.y,s*v.x+c*v.y); }
 float smin(float a,float b,float k){ float h=max(k-abs(a-b),0.)/k; return min(a,b)-h*h*k*.25; }
 float hg(float c,float g){ float g2=g*g; return (1.-g2)/(4.*PI*pow(1.+g2-2.*g*c,1.5)); }
@@ -61,7 +61,7 @@ float cloudDens(vec3 p,vec4 m0,vec4 m1,vec3 dk,vec4 tw,float lod,bool hq,out flo
     float amp=mix(150.,430.,up);
     float d=dk.x+(.52-bill)*amp*1.6; if(up>.12){ vec4 bg=nB(q+vec3(0.,-uTime*6.,0.),7400.,lod); d+=(.5-bg.g*.7-bg.r*.3)*1500.*smoothstep(.12,.8,up); }
     if(lam>.01){ vec4 s=nB(vec3(qr.x*.16,qr.y*1.15,qr.z*.16),1500.,lod); d+=(.5-s.g)*120.*lam; }
-    if(hq&&d<90.&&d>-150.){ vec3 qf=mix(q,qr,step(.5,wRot)); vec4 f=nD(qf,470.,max(lod-1.,0.)); d+=(.52-f.g*.7-f.r*.3)*mix(120.,150.,up); if(lod<1.6){ vec4 f2=nD(qf+31.,137.,max(lod,0.)); d+=(.5-f2.g)*46.*smoothstep(1.6,.3,lod); } }
+    if(hq&&d<90.&&d>-150.){ vec3 qf=mix(q,qr,step(.5,wRot)); vec4 f=nD(qf,470.,max(lod-1.,0.)); float fk=mix(1.,.4,smoothstep(9.,45.,gFp)); d+=(.52-f.g*.7-f.r*.3)*mix(120.,150.,up)*fk; float k2=smoothstep(1.6,.3,lod)*smoothstep(16.,5.,gFp); if(k2>.01){ vec4 f2=nD(qf+31.,137.,max(lod,0.)); d+=(.5-f2.g)*46.*k2; } }
     float soft=mix(38.,95.,up);
     dens=max(dens,smoothstep(12.,-soft,d)*m0.z); shell=min(shell,d);
   } else shell=min(shell,dk.x);
@@ -229,7 +229,7 @@ void main(){
     float sC=0.,sh=1e5; float ds=1e5;
     bool inC=dk.x<bndX||dk.y<300.||dk.z<900.;
     if(inC){
-      sC=cloudDens(p,m0,m1,dk,tw,lodC,true,sh);
+      gFp=t*uPix; sC=cloudDens(p,m0,m1,dk,tw,lodC,true,sh);
       float fine=max(16.,t*.0075)*uQual;
       ds=sC>0.?fine*(1.+2.2*smoothstep(-80.,-500.,sh)):max(fine,sh*.45);
       ds*=1.+1.5*smoothstep(.45,.05,T);
@@ -360,7 +360,7 @@ void main(){
   }
   vec4 sp=s/ws; float cdep=dsum/ws; if(mn.x>8.){ mn=sp; mxv=sp; }
   m1/=wm; m2/=wm; vec4 sd=sqrt(max(m2-m1*m1,vec4(0.)));
-  float hit=sat(wsh*1.6); vec4 cur=mix(sp,sh/max(wsh,1e-6),sat(wsh*4.));
+  float hit=sat(wsh*1.6); vec4 cur=mix(sp,sh/max(wsh,1e-6),sat(wsh*4.)*.65);
   // reprojection at the cloud depth (+ swirl inside tornadoes)
   vec3 p=uCam+rd*min(cdep,md); float mov=0.;
   for(int i=0;i<uNT;i++){ vec4 a=uT0[i]; float h=p.y-a.z; if(h<-40.||h>a.w*1.1) continue; vec4 pr=textureLod(uTProf,vec2(clamp(h/(a.w*1.25),0.,1.),(float(i)+.5)/float(NT)),0.); vec2 q=p.xz-a.xy-pr.xy; float r=length(q); float lim=max(pr.z*1.6,uT2[i].x*1.4); if(r>lim) continue;
@@ -369,13 +369,13 @@ void main(){
   if(pc.w<=0.||any(lessThan(puv,vec2(.5/uRes)))||any(greaterThan(puv,1.-.5/uRes))||uReset>.5){ o0=vec4(dec(toR(sp.rgb)),sat(sp.a)); o1=vec4(cdep,md,0.,1.); return; }
   vec4 h=hist(puv); vec4 hd=textureLod(uHistD,puv,0.);
   // neighbourhood clip (YCoCg + transmittance) against the jittered low-res samples
-  float g=mix(1.5,1.1,mov); vec4 lo=max(m1-g*sd,mn-.015), hi=min(m1+g*sd,mxv+.015); lo=min(lo,cur); hi=max(hi,cur);
+  vec2 vel0=(puv-uv)*uRes; float g=mix(mix(2.3,1.25,sat(length(vel0)*.08)),1.1,mov); vec4 lo=max(m1-g*sd,mn-.015), hi=min(m1+g*sd,mxv+.015); lo=min(lo,cur); hi=max(hi,cur);
   vec4 cc=.5*(lo+hi), ee=.5*(hi-lo)+1e-4, vv=h-cc; vec4 av=abs(vv/ee); float km=max(max(av.x,av.y),max(av.z,av.w)); vec4 hc=km>1.?cc+vv/km:h;
   float clampAmt=length((h-hc).xyz)+abs(h.a-hc.a);
   // scene disocclusion (history saw a different surface)
   float ds=abs(hd.y-md)/max(min(hd.y,md),1.); float dis=smoothstep(.1,.4,ds)*step(min(hd.y,md),59000.);
   vec2 vel=(puv-uv)*uRes;
-  float a=mix(uAlpha*.5,.3,hit);               // a fresh sample right here dominates, otherwise keep refining
+  float a=mix(uAlpha*.5,.2,hit);               // a fresh sample right here dominates, otherwise keep refining
   a=max(a,min(.22,length(vel)*.006)); a=mix(a,max(a,.25),smoothstep(.04,.35,clampAmt)); a=max(a,mov*.18);
   a=mix(a,.85,dis); cur=mix(cur,sp,dis*(1.-hit));
   vec4 r=mix(hc,cur,a); o0=vec4(dec(toR(r.rgb)),sat(r.a)); o1=vec4(cdep,md,0.,1.);

@@ -22,6 +22,8 @@ const PROXY = { [TL.mud]: L.dirt, [TL.red]: L.dirt, [TL.cliff]: L.rock, [TL.dese
 // per-scan albedo gain (linear) so scans with different exposure sit together
 const GAIN = { grass: 1.0, dry: .82, dirt: 1.1, plowed: 1.0, gravel: .9, sand: 1.05, rock: 1.05, snow: 1.12, forest: .62, crop: .95, mud: 1.0, redsoil: 1.0, cliff: .95, desert: 1.0 };
 const DBG = typeof location !== 'undefined' ? +(new URLSearchParams(location.search).get('tdbg') || 0) : 0;
+// per-scan roughness remap [min,max]: vegetation never reads glossy at grazing angles
+const ROUGH = { grass: [.8, 1], dry: [.82, 1], dirt: [.7, 1], plowed: [.75, 1], gravel: [.7, 1], sand: [.72, 1], rock: [.6, .95], snow: [.45, .8], forest: [.78, 1], crop: [.78, 1], mud: [.5, .95], redsoil: [.7, 1], cliff: [.62, .95], desert: [.72, 1] };
 const TEX_URL = new URL('../../assets/textures/terrain/', import.meta.url).href;
 
 function createGroundArrays(ctx, tex, uA, uN) {
@@ -31,12 +33,12 @@ function createGroundArrays(ctx, tex, uA, uN) {
   const VS = 'varying vec2 vUv; void main(){ vUv=uv; gl_Position=vec4(position.xy,0.,1.); }';
   const copy = new THREE.ShaderMaterial({ vertexShader: VS, uniforms: { tS: { value: null }, uL: { value: 0 } }, depthTest: false, depthWrite: false, toneMapped: false,
     fragmentShader: 'precision highp sampler2DArray; uniform sampler2DArray tS; uniform float uL; varying vec2 vUv; void main(){ gl_FragColor=texture(tS,vec3(vUv,uL)); }' });
-  const pack = new THREE.ShaderMaterial({ vertexShader: VS, uniforms: { tA: { value: null }, tN: { value: null }, tM: { value: null }, uMode: { value: 0 }, uGain: { value: 1 }, uM: { value: 512 } }, depthTest: false, depthWrite: false, toneMapped: false,
-    fragmentShader: /* glsl */`uniform sampler2D tA,tN,tM; uniform float uMode,uGain,uM; varying vec2 vUv;
+  const pack = new THREE.ShaderMaterial({ vertexShader: VS, uniforms: { tA: { value: null }, tN: { value: null }, tM: { value: null }, uMode: { value: 0 }, uGain: { value: 1 }, uR: { value: new THREE.Vector2(0, 1) }, uM: { value: 512 } }, depthTest: false, depthWrite: false, toneMapped: false,
+    fragmentShader: /* glsl */`uniform sampler2D tA,tN,tM; uniform float uMode,uGain,uM; uniform vec2 uR; varying vec2 vUv;
       vec3 s2l(vec3 c){ return mix(c/12.92,pow((c+.055)/1.055,vec3(2.4)),step(.04045,c)); }
       float mk(float k){ float x=clamp(fract(vUv.x),.5/uM,1.-.5/uM); return texture2D(tM,vec2((x+k)/3.,vUv.y)).r; }
       void main(){ if(uMode<.5){ vec3 a=s2l(texture2D(tA,vUv).rgb)*uGain; gl_FragColor=vec4(sqrt(clamp(a,0.,1.)),mk(2.)); }
-        else { gl_FragColor=vec4(texture2D(tN,vUv).rg,mk(0.),mk(1.)); } }` });
+        else { gl_FragColor=vec4(texture2D(tN,vUv).rg,mix(uR.x,uR.y,mk(0.)),mk(1.)); } }` });
   const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copy); quad.frustumCulled = false; scene.add(quad);
   const G = { inited: false, ready: [], loaded: 0, failed: 0, A, N: Nn };
   const draw = (renderer, rt, layer, last) => { rt.texture.generateMipmaps = !!last; renderer.setRenderTarget(rt, layer); renderer.render(scene, cam); };
@@ -63,7 +65,7 @@ function createGroundArrays(ctx, tex, uA, uN) {
     withState(renderer, () => {
       quad.material = pack;
       for (let k = 0; k < batch.length; k++) {
-        const b = batch[k], last = k === batch.length - 1, P = pack.uniforms; P.tA.value = b.ta; P.tN.value = b.tn; P.tM.value = b.tm; P.uGain.value = GAIN[b.name] ?? 1; P.uM.value = b.tm.image?.height || 512;
+        const b = batch[k], last = k === batch.length - 1, P = pack.uniforms; P.tA.value = b.ta; P.tN.value = b.tn; P.tM.value = b.tm; P.uGain.value = GAIN[b.name] ?? 1; P.uR.value.fromArray(ROUGH[b.name] || [0, 1]); P.uM.value = b.tm.image?.height || 512;
         P.uMode.value = 0; draw(renderer, A, b.layer, last); P.uMode.value = 1; draw(renderer, Nn, b.layer, last);
       }
     });
@@ -106,6 +108,7 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
         vec4 a1=textureGrad(uGA,vec3(uv+oa,l),dx,dy),a2=textureGrad(uGA,vec3(uv+ob,l),dx,dy); float w=smoothstep(.3,.7,f+(a2.a-a1.a)*.6);
         vec4 b1=textureGrad(uGN,vec3(uv+oa,l),dx,dy),b2=textureGrad(uGN,vec3(uv+ob,l),dx,dy); return mkLay(mix(a1,a2,w),mix(b1,b2,w)); }
       void over(inout Lay b,Lay a,float m){ float k=clamp((m-.5)*2.4+.5+(a.h-b.h)*.75*(1.-abs(m*2.-1.)),0.,1.); k=m<=.003?0.:(m>=.997?1.:mix(k,m,.3)); b.c=mix(b.c,a.c,k); b.n=mix(b.n,a.n,k); b.h=mix(b.h,a.h,k); b.o=mix(b.o,a.o,k); }
+      void mixL(inout Lay b,Lay a,float m){ float k=clamp(m+(a.h-b.h)*.25*(1.-abs(m*2.-1.)),0.,1.); b.c=mix(b.c,a.c,k); b.n=mix(b.n,a.n,k); b.h=mix(b.h,a.h,k); b.o=mix(b.o,a.o,k); }
       float g_stripe;
       `)
       .replace('#include <map_fragment>', /* glsl */`
@@ -125,16 +128,19 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
         if(dry>.02){ Lay d=lay(${TL.dry}.,ug*.93+.3,dx/3.1,dy/3.1); if(far>.01){ Lay q=lay(${TL.dry}.,ug2*.9+.2,dx.yx/19.,dy.yx/19.); d.c=mix(d.c,q.c,far*.6);} over(b,d,clamp(dry+(n0-.45)*.8,0.,1.)); } }
       // large-scale colour / brightness variation (macro) + lush-vs-tired grass
       b.c*=.78+.44*n1+.35*(n2-.45); b.c=mix(b.c,b.c*vec3(1.12,1.02,.70),clamp((n3-.35)*1.5,0.,1.)); b.c=mix(b.c,b.c*vec3(.86,1.06,.9),clamp((n4-.45)*2.,0.,1.)*(1.-arid));
+      { float gl=dot(b.c,vec3(.3,.55,.15)); b.c=mix(vec3(gl),b.c,.78)*vec3(.92,.9,.95); }
       vec3 soilT=mix(vec3(1.),vec3(1.18,.94,.82),red);
       float natural=1.;
       // ---- bare soil / desert / sand / red dirt
       float bare=smoothstep(.50,.80,arid*.92+(n1-.45)*.75+(n0-.45)*.35); bare=max(bare,smoothstep(.62,.72,n1*.6+n0*.4+arid*.1)*.45*(1.-forest));
-      if(bare>.003){ float sd=smoothstep(.78,.96,arid+(n2-.45)*.5); float sl=sd>.5?${TL.sand}.:(arid>.58+(n2-.45)*.3?${TL.desert}.:${TL.dirt}.); Lay s=layT(sl,p/3.7,dx/3.7,dy/3.7);
-        if(red>.2&&sd<.5){ Lay r=lay(${TL.red}.,p/3.9+.4,dx/3.9,dy/3.9); over(s,r,smoothstep(.2,.55,red+(n1-.45)*.6)); }
-        if(far>.01){ Lay q=lay(sl,ug2,dx.yx/17.,dy.yx/17.); s.c=mix(s.c,q.c,far*.6);} s.c*=soilT*(.84+.36*n1); over(b,s,bare); }
+      if(bare>.003){ float sd=smoothstep(.78,.96,arid+(n2-.45)*.5), dz=smoothstep(.45,.7,arid+(n2-.45)*.3+(n1-.45)*.2); float sl=dz>.5?${TL.desert}.:${TL.dirt}.; Lay s=layT(sl,p/3.7,dx/3.7,dy/3.7);
+        if(dz>.02&&dz<.98){ Lay o=lay(dz>.5?${TL.dirt}.:${TL.desert}.,p/3.7,dx/3.7,dy/3.7); mixL(s,o,dz>.5?1.-dz:dz); }
+        if(red>.15){ Lay r=lay(${TL.red}.,p/3.9+.4,dx/3.9,dy/3.9); mixL(s,r,smoothstep(.15,.6,red+(n1-.45)*.5+(n0-.45)*.2)*(1.-sd*.7)); }
+        if(sd>.01){ Lay r=layT(${TL.sand}.,p/4.1+.2,dx/4.1,dy/4.1); mixL(s,r,sd); }
+        if(far>.01){ Lay q=lay(sl,ug2,dx.yx/17.,dy.yx/17.); s.c=mix(s.c,q.c,far*.5);} s.c*=soilT*(.84+.36*n1); mixL(b,s,smoothstep(0.,1.,bare)); }
       // ---- forest floor / canopy
       float fm=smoothstep(.42,.7,forest+(n1-.45)*.5+(n2-.45)*.6)*(1.-urban);
-      if(fm>.003){ Lay f=layT(${TL.forest}.,p/3.6,dx/3.6,dy/3.6); f.c*=.7+.6*n1; f.c=mix(f.c,vec3(.018,.032,.010)*(0.55+1.2*n0+.5*(n1-.4)),smoothstep(500.,2600.,dist)*.85); over(b,f,fm*.92); }
+      if(fm>.003){ Lay f=layT(${TL.forest}.,p/3.6,dx/3.6,dy/3.6); { float fl=dot(f.c,vec3(.3,.55,.15)); f.c=mix(vec3(fl),f.c,.6)*vec3(.78,.66,.5); } f.c*=.62+.5*n1; f.c=mix(f.c,vec3(.018,.032,.010)*(0.55+1.2*n0+.5*(n1-.4)),smoothstep(500.,2600.,dist)*.85); over(b,f,fm*.92); }
       if(swamp>.05){ Lay f=layT(${TL.mud}.,p/3.,dx/3.,dy/3.); f.c*=vec3(.78,.8,.7); over(b,f,smoothstep(.35,.65,swamp*.8+(n1-.45)*1.1)*.8); }
       // ---- urban lots
       if(urban>.15){ float um=smoothstep(.45,.7,urban*.55+(n0-.45)*.5+(n1-.45)*.8+.12); Lay f=lay(${TL.concrete}.,p/5.,dx/5.,dy/5.); f.c*=(.32+.3*n1)*vec3(.95,.93,.9); over(b,f,um*.7*smoothstep(.55,.9,urban)); }
@@ -159,11 +165,11 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
             Lay f; float rows=smoothstep(140.,30.,dist); float rowN=pd>0.?0.:1.; // furrow normals only for straight rows
             // soil shared by tilled fields: plowed scan, red dirt in Oklahoma, mud when soaked
             #define SOIL(sc_) { f=layT(${TL.plowed}.,r/sc_,rx/sc_,ry/sc_); if(red>.2){ Lay rs=lay(${TL.red}.,r/(sc_*1.1)+.3,rx/(sc_*1.1),ry/(sc_*1.1)); over(f,rs,smoothstep(.2,.6,red)); } if(wetG>.01){ Lay md=lay(${TL.mud}.,r/sc_+.5,rx/sc_,ry/sc_); over(f,md,wetG*.75); } }
-            if(c==2u){ f=layT(${TL.grass}.,r/2.2,rx/2.2,ry/2.2); Lay q2=lay(${TL.grass}.,r/13.,rx/13.,ry/13.); f.c=mix(f.c,q2.c,far*.6)*vec3(.86,1.1,.66)*1.05; f.c*=1.+.05*band; f.n.xy*=.8; }
+            if(c==2u){ f=layT(${TL.grass}.,r/2.2,rx/2.2,ry/2.2); Lay q2=lay(${TL.grass}.,r/13.,rx/13.,ry/13.); f.c=mix(f.c,q2.c,far*.6)*vec3(.88,1.,.7); f.c*=1.+.05*band; f.n.xy*=.8; }
             else if(c==3u){ f=lay(${TL.wheat}.,r/2.4,rx/2.4,ry/2.4); Lay q2=lay(${TL.wheat}.,r/14.,rx/14.,ry/14.); f.c=mix(f.c,q2.c,far*.7)*vec3(1.,.96,.84); Lay d2=lay(${TL.dry}.,r/2.9+.2,rx/2.9,ry/2.9); f.c=mix(f.c,d2.c*vec3(1.25,1.12,.7),.25*rows); f.c*=1.+.06*band; }
             else if(c==4u||c==5u){ // corn / soy: leaf scan in rows over tilled soil
               float rs_=c==4u?.76:.5; Lay soil; SOIL(3.2) soil=f; Lay lf=layT(${TL.crop}.,r/1.9+.13,rx/1.9,ry/1.9); float rw=abs(fract(r.x/rs_)-.5)*2.; float cov=c==4u?.78:.62; cov=clamp(cov+(fh2-.5)*.3+(n1-.45)*.4,.2,1.);
-              float lm=smoothstep(cov+.18,cov-.18,rw+(lf.h-.5)*.55); float aa=smoothstep(.15,.6,rowAA/rs_); lm=mix(lm,cov,aa); lf.c*=c==4u?vec3(.92,1.02,.8):vec3(1.04,1.1,.86);
+              float lm=smoothstep(cov+.18,cov-.18,rw+(lf.h-.5)*.55); float aa=smoothstep(.15,.6,rowAA/rs_); lm=mix(lm,cov,aa); { float ll=dot(lf.c,vec3(.3,.55,.15)); lf.c=mix(vec3(ll),lf.c,.75); } lf.c*=c==4u?vec3(.8,.86,.66):vec3(.92,.98,.74);
               f=soil; f.c*=.85; over(f,lf,lm); f.c=mix(f.c,mix(lf.c,soil.c,1.-cov)*.95,far*.5); if(c==5u) f.c=mix(f.c,vec3(.11,.085,.06),.1); f.c*=1.+.05*band; }
             else if(c==6u||c==8u){ SOIL(3.2) Lay q2=lay(${TL.plowed}.,r/15.,rx/15.,ry/15.); f.c=mix(f.c,q2.c,far*.6); f.c*=(.85+.3*n1)*mix(vec3(1.),soilT,.5);
               float fu=r.x/.8*6.28318,aa=smoothstep(.1,.45,rowAA/.8); float fr=sin(fu+(n0-.45)*2.); f.c*=1.+.16*fr*(1.-aa)*rows; f.h=mix(f.h,.5+.45*fr,.55*(1.-aa)); float tilt=cos(fu)*.5*(1.-aa)*rowN; if(dirq>.5) f.n.x+=tilt; else f.n.y+=tilt;
@@ -202,7 +208,7 @@ export function createTerrainMaterial(ctx, tex, data, shared) {
       // ---- wetness: porous darkening, smoother/glossier, puddles in low spots (height map + macro noise) with rain ripples
       float poro=mix(.55,.75,natural*(1.-gg)); float w=uWetness; vec3 c=b.c; float R=clamp(b.n.z,0.04,1.); float flatN=smoothstep(.03,.006,slope);
       float low=1.-b.h; float pud=smoothstep(.62,.95,w*.75+low*.32+(n1-.45)*1.2+(n0-.45)*.6)*smoothstep(.3,.6,w)*flatN*max(max(gm*.95,ym),max(.4*(1.-natural),.16)); pud*=1.-smoothstep(60.,220.,dist)*.6;
-      c*=mix(1.,.5,w*poro*1.1); R=mix(R,R*.55,w*.8); float nf=1.-.7*smoothstep(40.,260.,dist); vec3 nl=vec3(b.n.xy*nf*mix(1.,.7,w),1.);
+      c*=mix(1.,.42,w*poro*1.15); c=mix(c,c*c/max(dot(c,vec3(.333)),1e-3),.25*w); R=mix(R,R*mix(.55,.8,natural),w*.85); float nf=1.-.7*smoothstep(40.,260.,dist); vec3 nl=vec3(b.n.xy*nf*mix(1.,.7,w),1.);
       if(pud>.003){ c=mix(c,c*.5,pud); R=mix(R,.04,pud); nl.xy*=1.-pud; if(uRain>.01&&dist<45.){ for(int k=0;k<2;k++){ vec2 rp=p*3.2+float(k)*.5; vec2 ic=floor(rp),fc=fract(rp)-.5; float hh=fract(sin(dot(ic,vec2(12.9898,78.233))+float(k)*7.1)*43758.5453); float t=fract(uTime*1.35+hh); float rr=length(fc-(hh-.5)*.4); float wv=sin((rr-t*.5)*46.)*smoothstep(.09,0.,abs(rr-t*.5))*(1.-t); nl.xy+=normalize(fc+1e-4)*wv*.45*pud*uRain; } } }
       // world normal from local detail (x,z plane)
       vec3 T=normalize(vec3(1.,0.,0.)-gn*gn.x); tN=normalize(T*nl.x+normalize(vec3(0.,0.,1.)-gn*gn.z)*nl.y+gn*nl.z*1.05);

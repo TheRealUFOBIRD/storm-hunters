@@ -260,28 +260,28 @@ function buildRoads(data, defs, F) {
   const pinInc = (x, z, hw, o) => {
     o.r = null; const a = inc.get(Math.floor(z / RC) * 4096 + Math.floor(x / RC)); if (!a) return o; let bk = 9, bd = 1e9;
     for (let q = 0; q < a.length; q += 2) { const r = a[q], i = a[q + 1], p = r.pts, ax = p[i * 2], az = p[i * 2 + 1], dx = p[i * 2 + 2] - ax, dz = p[i * 2 + 3] - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)), ex = x - ax - dx * t, ez = z - az - dz * t, d = Math.sqrt(ex * ex + ez * ez);
-      if (d >= r.hw + hw + 2 || r.k > bk || (r.k === bk && d >= bd)) continue; bk = r.k; bd = d; o.r = r; o.i = i; o.d = d; o.w = r.hw; o.y = ryAt(r, i, t) - CROWN * Math.min(d, r.hw); o.br = r.br[i] | r.br[i + 1]; o.x = ax + dx * t; o.z = az + dz * t; }
+      if (d >= r.hw + hw + 2 || r.k > bk || (r.k === bk && d >= bd)) continue; bk = r.k; bd = d; o.r = r; o.i = i; o.d = d; o.w = r.hw; o.y = ryAt(r, i, t) - CROWN * Math.min(d, r.hw); o.br = r.br[i] | r.br[i + 1]; o.x = ax + dx * t; o.z = az + dz * t; const l = Math.sqrt(dx * dx + dz * dz) || 1; o.dx = dx / l; o.dz = dz / l; o.m = r.m[i] + (r.m[i + 1] - r.m[i]) * t; }
     return o;
   };
   // Vertical profile: smoothed ground -> bridge clearance -> grade limit -> junction pins (blended over a distance that keeps
   // the extra grade small) -> constrained relaxation -> C1 Hermite tangents (sampler and mesh evaluate the same cubic).
   const finish = (r) => {
-    const p = r.pts, n = p.length / 2, br = new Uint8Array(n), sm = SMOOTH[r.kind], G = GMAX[r.kind], g = new Float32Array(n), pinY = new Float32Array(n), pin = new Uint8Array(n), lo = new Float32Array(n).fill(-1e9), s = new Float32Array(n);
+    const p = r.pts, n = p.length / 2, br = new Uint8Array(n), sm = SMOOTH[r.kind], G = GMAX[r.kind], g = new Float32Array(n), pinY = new Float32Array(n), pin = new Uint8Array(n), pinM = new Float32Array(n), wlv = new Float32Array(n).fill(-1e9), lo = new Float32Array(n).fill(-1e9), s = new Float32Array(n);
     for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(p[i * 2] - p[i * 2 - 2], p[i * 2 + 1] - p[i * 2 - 1]);
     const ds = n > 1 ? s[n - 1] / (n - 1) : 24;
     for (let i = 0; i < n; i++) {
       const x = p[i * 2], z = p[i * 2 + 1], gr = sampG.groundAt(x, z), wl = sampG.waterLevelAt(x, z); g[i] = gr;
-      if (wl > gr - .4 && wl < gr + 25) { br[i] = 1; g[i] = wl + 5.5; for (let q = i; q >= 0 && s[i] - s[q] < 260; q--) { const v = wl + 4 - (s[i] - s[q]) * G * .7; if (v > lo[q]) lo[q] = v; } for (let q = i; q < n && s[q] - s[i] < 260; q++) { const v = wl + 4 - (s[q] - s[i]) * G * .7; if (v > lo[q]) lo[q] = v; } }
-      pinInc(x, z, r.hw, tmp); if (tmp.r) {
+      if (wl > gr - .4 && wl < gr + 6) { br[i] = 1; g[i] = wl + 5.5; wlv[i] = wl; } // deeper water is a river-profile artefact: ignore
+      pinInc(x, z, r.hw + ds * .5, tmp); if (tmp.r) {
         const dy = tmp.y - gr, o = tmp.r;
         if (tmp.br && !br[i] && dy > 5.5) continue; // passes under an existing bridge
-        if (dy > 7.5 && !br[i] && o.k <= r.k) { for (let j = Math.max(0, tmp.i - 2); j <= Math.min(o.pts.length / 2 - 1, tmp.i + 3); j++) if (Math.hypot(o.pts[j * 2] - tmp.x, o.pts[j * 2 + 1] - tmp.z) < r.hw + 30) o.br[j] = 1; continue; } // underpass: the embanked road gets a deck
-        if (dy < -7.5 && o.k >= r.k) { br[i] = 1; const v0 = tmp.y + 6.5; for (let q = 0; q < n; q++) { const v = v0 - Math.abs(s[q] - s[i]) * G * .8; if (v > lo[q]) lo[q] = v; } continue; } // overpass over a road in a cut
-        pin[i] = 1; pinY[i] = tmp.y;
+        void o; // heightAt is single-valued: no under/overpasses, every crossing is an at-grade junction
+        pin[i] = 1; pinY[i] = tmp.y; { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1), ux = p[b * 2] - p[a * 2], uz = p[b * 2 + 1] - p[a * 2 + 1], l = Math.hypot(ux, uz) || 1; pinM[i] = tmp.m * (ux * tmp.dx + uz * tmp.dz) / l; } // our slope across the owner = its slope projected on our direction
       }
     }
     const relax = (a, passes, fixed) => { for (let k = 0; k < passes; k++) for (let i = 1; i < n - 1; i++) { if (fixed && fixed[i]) continue; const v = (a[i - 1] + a[i] * 2 + a[i + 1]) / 4; a[i] = v > lo[i] ? v : lo[i]; } };
     for (let pass = 0; pass < 2; pass++) { const o = g.slice(); for (let i = 0; i < n; i++) { let a = 0, w = 0; for (let k = -sm; k <= sm; k++) { const q = clamp(i + k, 0, n - 1), ww = sm + 1 - Math.abs(k); a += o[q] * ww; w += ww; } g[i] = a / w; } }
+    for (let i = 0; i < n; i++) if (wlv[i] > -1e8) { const top = wlv[i] + 4; for (let dir = -1; dir <= 1; dir += 2) for (let q = i; q >= 0 && q < n; q += dir) { const v = top - Math.abs(s[q] - s[i]) * G * .7; if (v <= g[q]) break; if (v > lo[q]) lo[q] = v; } } // bridge clearance ramps that end on the profile
     for (let i = 0; i < n; i++) if (g[i] < lo[i]) g[i] = lo[i];
     relax(g, 2); const g0 = g.slice(), DEV = DEVMAX[r.kind];
     for (let it = 0; it < 40; it++) { // grade limit: spread excess climb to both ends of a too-steep step, but stay within DEV of the smoothed ground
@@ -296,7 +296,7 @@ function buildRoads(data, defs, F) {
       for (const j of pj) { y[j] = pinY[j]; br[j] = 0; }
       relax(y, 3, pin);
     }
-    const m = new Float32Array(n); for (let i = 0; i < n; i++) { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); m[i] = b > a ? (y[b] - y[a]) / (s[b] - s[a]) : 0; }
+    const m = new Float32Array(n); for (let i = 0; i < n; i++) { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); m[i] = pin[i] ? pinM[i] : b > a ? (y[b] - y[a]) / (s[b] - s[a]) : 0; }
     r.y = y; r.m = m; r.br = br; r.id = roads.length; r.s = s; r.len = s[n - 1]; roads.push(r); addInc(r);
   };
   const mk = (kind, name, pts, blk = 0) => ({ kind, name, pts, hw: HW[kind], sh: SH[kind], k: KINDS.indexOf(kind), blk });
@@ -315,7 +315,7 @@ function buildRoads(data, defs, F) {
       for (let i = -n; i <= n; i++) {
         let cur = []; const flush = () => { if (cur.length >= 6) finish(mk('street', along ? `${Math.abs(i) + 1}${['th', 'st', 'nd', 'rd'][(Math.abs(i) + 1) % 10 < 4 && !((Math.abs(i) + 1) > 10 && (Math.abs(i) + 1) < 14) ? (Math.abs(i) + 1) % 10 : 0]} St` : i ? `${['Oak', 'Elm', 'Maple', 'Cedar', 'Walnut', 'Pecan', 'Locust', 'Cherry', 'Pine'][Math.abs(i) % 9]} ${i < 0 ? 'Ave' : 'Blvd'}` : 'Main St', new Float32Array(cur), S)); cur = []; };
         for (let t = -n; t < n; t++) {
-          let ok = true; const pa = [], u = i * S; for (let q = 0; q <= 4; q++) { const v = (t + q / 4) * S, x = c.x + (along ? v : u), z = c.z + (along ? u : v); if (Math.sqrt(u * u + v * v) > R + 10) ok = false; nearInc(x, z, o); if (o.r && o.r.k < 2 && o.d < o.w + 14 && Math.abs(along ? o.dx : o.dz) > .8) ok = false; const wl = sampG.waterLevelAt(x, z); if (wl > -1e8 && wl > sampG.groundAt(x, z) - .5) ok = false; pa.push(x, z); }
+          let ok = true; const pa = [], u = i * S; for (let q = 0; q <= 4; q++) { const v = (t + q / 4) * S, x = c.x + (along ? v : u), z = c.z + (along ? u : v); if (Math.sqrt(u * u + v * v) > R + 10) ok = false; nearInc(x, z, o); if (o.r && o.r.k < 2 && o.d < o.w + 14 && Math.abs(along ? o.dx : o.dz) > .8) ok = false; if (o.r && o.r.k < 2 && o.d < o.w + 16 && Math.abs(o.y - sampG.groundAt(x, z)) > 3) ok = false; /* no ramps up embanked highways: the street ends short of it */ const wl = sampG.waterLevelAt(x, z); if (wl > -1e8 && wl > sampG.groundAt(x, z) - .5) ok = false; pa.push(x, z); }
           if (!ok || (c.town && hash2(i + 50, t + 50, c.x & 1023) < .12)) { flush(); continue; } if (!cur.length) cur.push(pa[0], pa[1]); for (let q = 1; q <= 4; q++) cur.push(pa[q * 2], pa[q * 2 + 1]);
         } flush();
       }
@@ -330,7 +330,7 @@ function buildRoads(data, defs, F) {
     const x0 = (SX0 + i) * SEC, z0 = (SZ0 + j) * SEC, cx = x0 + SEC / 2, cz = z0 + SEC / 2, fa = gi(F.farm, cx, cz), e = (j * SNX + i) * 4, h = (s) => hash2(SX0 + i, SZ0 + j, s); if (sampG.coastAt(cx, cz) < 600 || !inUS(cx, cz)) continue;
     const road = (vert) => {
       if (Math.abs(cx) > 49000 || Math.abs(cz) > 30800) return 0; const mx = vert ? x0 : cx, mz = vert ? cz : z0, p = Math.max(plainsness(mx, mz) * Math.min(1, gi(F.farm, mx, mz) * 1.3 + .12), 0); if (h(vert ? 3 : 4) > p * 1.15) return 0;
-      let par = 0; for (let q = 0; q <= 10; q++) { const x = vert ? x0 : x0 + SEC * q / 10, z = vert ? z0 + SEC * q / 10 : z0; if (bad(x, z)) return 0; nearInc(x, z, o); if (o.r && o.r.k < 2 && o.d < o.w + 60 && Math.abs(vert ? o.dz : o.dx) > .8) par++; if (Math.abs(sampG.groundAt(x + 20, z) - sampG.groundAt(x - 20, z)) > 9) return 0; }
+      let par = 0; for (let q = 0; q <= 10; q++) { const x = vert ? x0 : x0 + SEC * q / 10, z = vert ? z0 + SEC * q / 10 : z0; if (bad(x, z)) return 0; nearInc(x, z, o); if (o.r && o.r.k < 2 && o.d < o.w + 60 && Math.abs(vert ? o.dz : o.dx) > .8) par++; if (o.r && o.r.k < 2 && o.d < o.w + 12 && Math.abs(o.y - sampG.groundAt(x, z)) > 3.5) return 0; if (Math.abs(sampG.groundAt(x + 20, z) - sampG.groundAt(x - 20, z)) > 9) return 0; if (q && Math.abs(sampG.groundAt(x, z) - sampG.groundAt(vert ? x : x - SEC / 10, vert ? z - SEC / 10 : z)) > 10) return 0; }
       if (par > 2) return 0; const m = Math.round(SEC / 40), pts = new Float32Array((m + 1) * 2); for (let q = 0; q <= m; q++) { pts[q * 2] = vert ? x0 : x0 + SEC * q / m; pts[q * 2 + 1] = vert ? z0 + SEC * q / m : z0; }
       finish(mk('gravel', vert ? `County Rd ${1000 + (SX0 + i) * 10}` : `E ${2000 + (SZ0 + j) * 10} Rd`, pts)); return 1;
     };

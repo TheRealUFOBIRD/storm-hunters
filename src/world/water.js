@@ -11,7 +11,7 @@ import { GX, GZ, OX, OZ, CELL } from './sampler.js';
 // 0 ocean, 1 great lake, 2 green lake, 3 muddy plains river, 4 clear/green river, 5 salt lake, 6 alpine lake, 7 red muddy
 const TYPES = [
   { alb: [.0035, .016, .028], ext: [.32, .06, .045] },
-  { alb: [.005, .02, .024], ext: [.38, .085, .095] },
+  { alb: [.005, .021, .022], ext: [.5, .16, .17] },
   { alb: [.011, .028, .017], ext: [.6, .24, .4] },
   { alb: [.07, .05, .029], ext: [1.6, 2.0, 2.7] },
   { alb: [.012, .026, .019], ext: [.7, .3, .38] },
@@ -42,7 +42,7 @@ function waveField(N, seed) {
   const kp = 3.2, kc = N * .3;
   for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
     const kx = i <= N / 2 ? i : i - N, kz = j <= N / 2 ? j : j - N, k = Math.hypot(kx, kz), o = j * N + i; const a = g(), b = g(); if (k < 1) continue;
-    const c = kx / k, dir = .22 + .78 * c * c * c * c, P = Math.exp(-((kp / k) ** 2) * 1.2) * Math.pow(k, -3.4) * dir * Math.exp(-(k / kc) ** 2), s = Math.sqrt(P);
+    const c = kx / k, dir = .22 + .78 * c * c * c * c, P = Math.exp(-((kp / k) ** 2) * 1.2) * Math.pow(k, -3.4) * dir * Math.exp(-((k / kc) ** 2)), s = Math.sqrt(P);
     Hr[o] = a * s; Hi[o] = b * s;
   }
   const hr = Hr.slice(), hi = Hi.slice(), xr = new Float32Array(N * N), xi = new Float32Array(N * N), zr = new Float32Array(N * N), zi = new Float32Array(N * N);
@@ -114,7 +114,7 @@ ${fogGLSL}
 #include <cube_uv_reflection_fragment>
 uniform sampler2D uEnv;
 #endif
-uniform sampler2D uNrm, uAux, uDepth, uColor, uVol;
+uniform sampler2D uNrm, uAux, uDepth, uColor, uVol, uDep; uniform vec4 uDepXf;
 uniform vec4 uDepthK, uAmp, uTor, uLightning; uniform vec2 uRes, uWindDir, uWind; uniform mat4 uVP;
 uniform float uTime, uRain, uGust, uWc, uStormDark, uHasCol, uHasVol, uEnvOn, uFlowT;
 uniform vec3 uSunDir, uSunColor, uAmbient; uniform vec3 uAlb[8], uExt[8];
@@ -236,7 +236,7 @@ void main(){
     // shoreline / around obstacles (soft intersection)
     float sw = .5+.5*sin(t*(ty==0?.85:1.4) - depthV*(ty==0?2.1:4.) + aux0.a*9.);
     float shore = (1.-smoothstep(0., ty==0 ? 1.3 : ty>=3 ? .55 : .7, depthV + (1.-sw)*.25))*mix(.45, 1., sw);
-    foam = max(foam, shore*smoothstep(.35,.85,fp+.2*sw)*(ty==0 ? 1. : .7));
+    foam = max(foam, shore*smoothstep(.45,.95,fp+.2*sw)*(ty==0 ? 1. : ty>=3 ? .35 : .6));
     // whitecaps on crests in strong wind
     float wc = uWc*(ty==0 ? 1. : ty==1 ? .85 : ty>=3 ? .35 : .6);
     if(wc > .01){ float c1 = texture2D(uAux, vec2(cos(wa-.47)*p.x+sin(wa-.47)*p.y, -sin(wa-.47)*p.x+cos(wa-.47)*p.y)/37. + vec2(t*.034, t*.004)).r;
@@ -251,6 +251,10 @@ void main(){
   vec3 surf = F*refl + spec + (1.-F)*(vec3(1.)-T)*Lb;
   surf = mix(surf, Lfoam, foam);
   float edge = smoothstep(0., .05 + dist*.0012, depthV);
+  { vec4 mk = texture2D(uDep, (P.xz-uDepXf.xy)*uDepXf.zw); // clip ocean / lake planes to the real coast / shore
+    if(ty==0) edge *= 1.-smoothstep(150., 260., (mk.a*255.-128.)*8.);
+    else if(abs(vW.w) < .5) edge *= 1.-smoothstep(20., 70., (mk.b*255.-128.)*8.);
+    if(edge < .002) discard; }
   vec3 col;
 #ifdef PIPE
   vec4 ap = aerial(cam, rd, dist); vec3 Ta = pow(vec3(ap.a), vec3(.82,1.,1.2)), A = ap.rgb;
@@ -269,7 +273,7 @@ void main(){
 #else
   col = surf + (1.-F)*T*alb*Eb*3.;
 #endif
-  if(under){ vec3 Tu = exp(-ext*dist*1.5); col = mix(Lb*1.5, col, Tu); edge = 1.; }
+  if(under){ vec3 Tu = exp(-ext*dist*1.5); col = mix(Lb*1.5, col, Tu); }
   gl_FragColor = vec4(max(col, vec3(0.)), edge);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -284,8 +288,19 @@ export function createWater(ctx, S, shared) {
   const dep = new Uint8Array(GX * GZ * 4);
   for (let j = 0, k = 0; j < GZ; j++) for (let i = 0; i < GX; i++, k++) {
     const dm = Math.max(0, -data.mac[k * 4]); dep[k * 4] = Math.min(255, Math.round(dm * 6)); const x = OX + i * CELL, z = OZ + j * CELL;
-    let tb = Math.max(0, .35 - dm * .03); for (const m of mouths) tb += m[2] * Math.exp(-Math.hypot(x - m[0], z - m[1]) / (9000 * Math.sqrt(m[2]) + 1500));
-    dep[k * 4 + 1] = Math.round(Math.min(1, tb) * 255);
+    let tb = Math.max(0, .2 - dm * .02); for (const m of mouths) tb += m[2] * Math.exp(-Math.hypot(x - m[0], z - m[1]) / (9000 * Math.sqrt(m[2]) + 1500));
+    dep[k * 4 + 1] = Math.round(Math.min(1, tb) * 255); dep[k * 4 + 2] = 255; dep[k * 4 + 3] = Math.max(0, Math.min(255, Math.round(128 + data.coast[k] / 8)));
+  }
+  // b = signed distance to the real lake shore (+ outside): lake planes are clipped there, so they never float over land that
+  // sits below the lake level (flattened city sites like Chicago)
+  const segD = (x, z, ax, az, bx, bz) => { const dx = bx - ax, dz = bz - az; let t = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1); t = t < 0 ? 0 : t > 1 ? 1 : t; return Math.hypot(x - ax - dx * t, z - az - dz * t); };
+  for (const L of data.lakes) {
+    const r = L.ring, n = r.length / 2, i0 = Math.max(0, Math.floor((L.x0 - 1200 - OX) / CELL)), i1 = Math.min(GX - 1, Math.ceil((L.x1 + 1200 - OX) / CELL)), j0 = Math.max(0, Math.floor((L.z0 - 1200 - OZ) / CELL)), j1 = Math.min(GZ - 1, Math.ceil((L.z1 + 1200 - OZ) / CELL));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const x = OX + i * CELL, z = OZ + j * CELL; let d = 1e9, ins = false;
+      for (let a = 0, b = n - 1; a < n; b = a++) { d = Math.min(d, segD(x, z, r[b * 2], r[b * 2 + 1], r[a * 2], r[a * 2 + 1])); const za = r[b * 2 + 1], zb = r[a * 2 + 1]; if ((za > z) !== (zb > z) && x < r[b * 2] + (z - za) / (zb - za) * (r[a * 2] - r[b * 2])) ins = !ins; }
+      const v = Math.max(0, Math.min(255, Math.round(128 + (ins ? -d : d) / 8))), k = (j * GX + i) * 4; if (Math.abs(v - 128) < Math.abs(dep[k + 2] - 128)) dep[k + 2] = v;
+    }
   }
   const dt = new THREE.DataTexture(dep, GX, GZ, THREE.RGBAFormat); dt.minFilter = dt.magFilter = THREE.LinearFilter; dt.needsUpdate = true;
   // ---- textures

@@ -21,7 +21,9 @@ export function resolveQuality(settings, rendererName = '') {
     const r = rendererName.toLowerCase();
     if (/mobile|adreno|mali|swiftshader|llvmpipe|software|basic render/.test(r) || /android|iphone|ipad/i.test(navigator.userAgent)) q = 'low';
     else if (/intel(?!.*arc)|uhd|iris|radeon\(tm\) graphics|vega \d\b/.test(r)) q = 'low';
-    else if (/rtx|rx [679]\d{3}|arc|m[1-5] (pro|max|ultra)/.test(r)) q = 'high'; else q = 'medium';
+    else if (/rtx|rx [679]\d{3}|arc|m[1-5] (pro|max|ultra)/.test(r)) q = 'high';
+    // Firefox masks the GPU: every modern discrete NVIDIA reports "GeForce GTX 980, or similar", AMD "Radeon R9 200 Series"
+    else if (/gtx 980|r9 200|or similar/.test(r)) q = 'high'; else q = 'medium';
   }
   return PRESETS[q];
 }

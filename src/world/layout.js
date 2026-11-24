@@ -1,12 +1,13 @@
 // Deterministic object placement per 512 m sector (runs in the worker). No three.js.
-import { KI, STRIDE, SS, SOX, SOZ, SGX } from './kinds.js';
+import { KI, KIND, STRIDE, SS, SOX, SOZ, SGX } from './kinds.js';
 import { RC, RGX, RGZ, ROX, ROZ, SEC } from './sampler.js';
 import { hash2 } from '../core/rng.js';
 import { gnoise } from '../core/noise.js';
 import { toLatLon } from '../core/geo.js';
+import { makeCityGen } from './citygen.js';
 
 export function makeLayout(s) {
-  const D = s.data, roads = D.roads, seg = D.seg, O = s.O;
+  const D = s.data, roads = D.roads, seg = D.seg, O = s.O, cityGen = makeCityGen(s);
   // cities passed by each major road (for guide signs)
   const passes = roads.map((r) => { if (r.k > 1) return null; const a = []; for (const c of D.cities) { let best = 1e18, bs = 0; const p = r.pts; for (let i = 0; i < p.length; i += 4) { const d = (p[i] - c.x) ** 2 + (p[i + 1] - c.z) ** 2; if (d < best) { best = d; bs = r.s[i / 2]; } } if (best < (c.radius * 1.2) ** 2) a.push([bs, c.name, c.pop]); } return a.sort((x, y) => x[0] - y[0]); });
   const at = (r, s0, o) => { // point & tangent at arclength
@@ -14,10 +15,20 @@ export function makeLayout(s) {
     const f = (s0 - r.s[lo]) / Math.max(1e-6, r.s[hi] - r.s[lo]), dx = p[hi * 2] - p[lo * 2], dz = p[hi * 2 + 1] - p[lo * 2 + 1], l = Math.hypot(dx, dz) || 1; o.x = p[lo * 2] + dx * f; o.z = p[lo * 2 + 1] + dz * f; o.tx = dx / l; o.tz = dz / l; o.y = r.y[lo] + (r.y[hi] - r.y[lo]) * f; return o;
   };
   const roadClear = (x, z, m) => { s.heightAt(x, z); return O.eMaj > m && O.eStr > m * .8 && O.eGrv > m * .6; };
+  // ROADS: every placed object keeps its footprint off all road surfaces (paved incl. shoulder + skirt, gravel incl.
+  // edge, junctions, bridge decks). Sidewalks are not road: small street furniture may stand there.
+  const FOOT = KIND.map((d) => (d.col && d.col[0] === 'box' ? [1, d.col[1], d.col[3]] : [0, d.col ? d.col[1] : .3, 0]));
+  const gapOk = (x, z, r) => { s.heightAt(x, z); return !O.deck && O.eMaj > r + 1.2 && O.eGrv > r + .8 && O.eStr > r + (r > 1.5 ? 2.6 : .15); };
+  const offRoad = (k, x, z, rot, sxz) => {
+    const f = FOOT[k] || FOOT[0]; if (!f[0]) return gapOk(x, z, f[1] * sxz);
+    const c = Math.cos(rot), sn = Math.sin(rot), hx = f[1] * sxz, hz = f[2] * sxz; if (!gapOk(x, z, 0)) return false;
+    for (let a = -1; a <= 1; a += 2) for (let b = -1; b <= 1; b += 2) { const lx = a * hx, lz = b * hz; if (!gapOk(x + lx * c + lz * sn, z - lx * sn + lz * c, 0)) return false; }
+    return true;
+  };
   function sector(si, sj) {
     const x0 = SOX + si * SS, z0 = SOZ + sj * SS, x1 = x0 + SS, z1 = z0 + SS, items = [], wires = [], signs = [];
     const inS = (x, z) => x >= x0 && x < x1 && z >= z0 && z < z1;
-    const put = (k, x, z, rot, sxz = 1, sy = 1, seed = hash2(x * 7 | 0, z * 7 | 0, k), y) => { items.push(k, x, y ?? s.terrainAt(x, z), z, rot, sxz, sy, seed); return items.length / STRIDE - 1; };
+    const put = (k, x, z, rot, sxz = 1, sy = 1, seed = hash2(x * 7 | 0, z * 7 | 0, k), y) => { if (!offRoad(k, x, z, rot, sxz)) return -1; items.push(k, x, y ?? s.terrainAt(x, z), z, rot, sxz, sy, seed); return items.length / STRIDE - 1; };
     const wet = (x, z) => s.waterLevelAt(x, z) > -1e8;
     // ---------- roadside
     const segs = new Set(); for (let cj = Math.floor((z0 - ROZ) / RC); cj < Math.ceil((z1 - ROZ) / RC); cj++) for (let ci = Math.floor((x0 - ROX) / RC); ci < Math.ceil((x1 - ROX) / RC); ci++) { if (ci < 0 || cj < 0 || ci >= RGX || cj >= RGZ) continue; const c = cj * RGX + ci; for (let q = D.segIdx.off[c]; q < D.segIdx.off[c + 1]; q++) segs.add(D.segIdx.ref[q]); }
@@ -28,7 +39,7 @@ export function makeLayout(s) {
       // utility poles + wires
       const hasPoles = k === 1 || (k === 3 && rh < .55) || (k === 0 && rh < .3);
       if (hasPoles && !bridge) { const side = r.id & 1 ? 1 : -1, off = side * (r.hw + (k === 3 ? 5.5 : k === 0 ? 20 : 10.5)), sp = k === 3 ? 52 : 46;
-        mark(sp, off, (t, x, z) => { if (wet(x, z) || !roadClear(x, z, 1.5) || s.otherEdge(x, z, r.id) < 3 || s.bio(x, z).urban > .55) return; const y = s.terrainAt(x, z), rot = Math.atan2(P.tx, P.tz), i = put(KI.pole, x, z, rot, 1, .92 + hash2(t | 0, r.id, 3) * .16, undefined, y);
+        mark(sp, off, (t, x, z) => { if (wet(x, z) || !roadClear(x, z, 1.5) || s.otherEdge(x, z, r.id) < 3 || s.bio(x, z).urban > .55) return; const y = s.terrainAt(x, z), rot = Math.atan2(P.tx, P.tz), i = put(KI.pole, x, z, rot, 1, .92 + hash2(t | 0, r.id, 3) * .16, undefined, y); if (i < 0) return;
           at(r, t + sp, Q); const nx = Q.x - Q.tz * off, nz = Q.z + Q.tx * off; if (wet(nx, nz) || !roadClear(nx, nz, 1.5)) return; const ny = s.terrainAt(nx, nz), h = 10 * items[i * STRIDE + 6];
           for (const [u, dh] of [[-1.05, 0], [1.05, 0], [0, .9]]) { const ax = x + P.tz * u * 0 - P.tz * 0 + Math.cos(rot) * u, az = z - Math.sin(rot) * u, bx = nx + Math.cos(rot) * u, bz = nz - Math.sin(rot) * u; let px = ax, py = y + h - .25 + dh, pz = az; for (let w = 1; w <= 6; w++) { const f = w / 6, sag = Math.sin(Math.PI * f) * .9, X = ax + (bx - ax) * f, Y = y + h - .25 + dh + (ny - y) * f - sag, Z = az + (bz - az) * f; wires.push(px, py, pz, X, Y, Z, i); px = X; py = Y; pz = Z; } } }); }
       // fences
@@ -40,7 +51,7 @@ export function makeLayout(s) {
         for (const dir of [1, -1]) mark(2900, dir * (r.hw + 4.5), (t, x, z) => {
           if (wet(x, z) || s.otherEdge(x, z, r.id) < 6 || s.bio(x, z).urban > .4) return; const ps = passes[r.id], lines = [];
           if (dir > 0) { for (const p of ps) if (p[0] > t + 300 && lines.length < 2) lines.push([p[1], Math.max(1, Math.round((p[0] - t) / 18.8 * .6214))]); } else { for (let i = ps.length - 1; i >= 0; i--) if (ps[i][0] < t - 300 && lines.length < 2) lines.push([ps[i][1], Math.max(1, Math.round((t - ps[i][0]) / 18.8 * .6214))]); }
-          if (!lines.length) return; const rot = Math.atan2(-P.tx * dir, -P.tz * dir); const i = put(KI.signGreen, x, z, rot); signs.push({ i, route: r.name, lines });
+          if (!lines.length) return; const rot = Math.atan2(-P.tx * dir, -P.tz * dir); const i = put(KI.signGreen, x, z, rot); if (i >= 0) signs.push({ i, route: r.name, lines });
         });
       }
     }
@@ -82,23 +93,7 @@ export function makeLayout(s) {
       const big = kind === KI.rock ? .6 + hash2(x, z, 84) * 1.8 : .75 + hash2(x, z, 84) * .55; put(kind, jx, jz, hash2(x, z, 85) * 6.283, big, big * (.85 + hash2(x, z, 86) * .3), hash2(x, z, 87), g - (kind === KI.rock ? .3 : 0));
     }
     // ---------- towns & cities
-    for (const c of D.cities) {
-      const Rr = c.radius * .96, S = c.block, n = Math.floor(Rr / S); if (c.x + Rr < x0 || c.x - Rr > x1 || c.z + Rr < z0 || c.z - Rr > z1) continue;
-      for (let bj = -n; bj < n; bj++) for (let bi = -n; bi < n; bi++) {
-        const bx = c.x + (bi + .5) * S, bz = c.z + (bj + .5) * S, d = Math.hypot(bx - c.x, bz - c.z) / Rr; if (d > .97 || !inS(bx, bz)) continue; const h = (k) => hash2(bi + 99, bj + 99, (c.x & 4095) + k);
-        const lots = []; let type;
-        if (!c.town && d < .2) type = 'tower'; else if (!c.town && d < .38) type = h(1) < .5 ? 'office' : 'apartment'; else if (c.town ? d < .28 : d < .55) type = h(2) < .7 ? 'shop' : h(2) < .85 ? 'warehouse' : 'gas'; else type = c.town && d > .7 && h(3) < .25 ? 'mobile' : 'house';
-        if (c.town && bi === 0 && bj === 0) type = 'waterTower'; if (c.town && bi === -n && bj === 0) type = 'elevator'; if (h(4) < .05) type = 'church'; if (c.town && h(5) < .05) type = 'motel';
-        if (type === 'tower' || type === 'office' || type === 'waterTower' || type === 'elevator' || type === 'church' || type === 'warehouse' || type === 'motel' || type === 'apartment') lots.push([0, 0, type === 'elevator' ? 0 : Math.PI / 2 * Math.floor(h(6) * 4) * (type === 'church' ? 1 : 0)]);
-        else if (type === 'gas') lots.push([0, -18, 0]); else { const per = type === 'shop' ? [-38, -12, 14, 40] : [-36, 0, 36]; for (const px of per) { lots.push([px, -S / 2 + 20.5, Math.PI]); lots.push([px, S / 2 - 20.5, 0]); } }
-        for (const [lx, lz, rot] of lots) {
-          const x = bx + lx, z = bz + lz; if (wet(x, z) || !roadClear(x, z, type === 'tower' ? 14 : 7)) continue;
-          const kn = type === 'house' ? (h(lx + lz * 3) < .5 ? KI.house : KI.house2) : KI[type]; const sy = type === 'tower' ? 1 + Math.min(3.2, c.pop / 9e5) * (1 - d / .2) * (.4 + h(7) * .8) : type === 'office' ? .8 + h(8) * .9 : 1;
-          put(kn, x, z, rot + (type === 'house' ? (h(lx) - .5) * .06 : 0), 1, sy, h(lx * 7 + lz));
-          if (type === 'house' && h(lx + 31) < .7) { const tx = x + (h(lx + 32) - .5) * 20, tz = z + (lz < 0 ? -1 : 1) * 15; put(h(lx + 33) < .7 ? KI.oak : KI.cottonwood, tx, tz, h(lx) * 6, .8, .8 + h(lz) * .3); }
-        }
-      }
-    }
+    for (const c of D.cities) { const m = c.radius * 1.7; if (c.x + m < x0 || c.x - m > x1 || c.z + m < z0 || c.z - m > z1) continue; cityGen.city(c, x0, z0, x1, z1, (k, x, z, rot, sxz, sy, seed) => put(k, x, z, rot, sxz, sy, seed)); } // CITIES: citygen.js
     // radio towers near towns
     const items32 = new Float32Array(items), w32 = new Float32Array(wires);
     return { items: items32, wires: w32, signs, buffers: [items32.buffer, w32.buffer] };

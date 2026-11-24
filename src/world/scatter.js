@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { KIND, KI, STRIDE, SEC_IDS, SS, SOX, SOZ, SGX, SGZ, NTREE } from './kinds.js';
 import { makeAtlas, treeGeo, plantGeo, propGeo, bldGeo } from './geo.js';
 import { BL } from './textures.js';
+import { loadNature, natureMaterial, bakeImpostors, impostorMaterial } from './models.js';
 
 const WIND_GLSL = /* glsl */`
 uniform vec2 uWind; uniform float uGust,uTime; uniform vec4 uTornadoA[4]; uniform vec3 uCamP; uniform vec4 uLod;
@@ -16,6 +17,11 @@ function patchVS(sh, sway, instanced) {
     float dc=length(base-uCamP); float hs=fract(sin(dot(base.xz,vec2(12.9898,78.233)))*43758.5453);
     vFade=(uLod.x>0.?smoothstep(uLod.x-12.,uLod.x,dc):1.)*(1.-smoothstep(uLod.w*.9,uLod.w,dc)); if(uLod.y>0.&&hs>mix(1.,.38,smoothstep(uLod.y,uLod.z,dc))) vFade=0.;
     ${sway ? `float hy=max(wp.y-base.y,0.); vec2 w=shWindAt(base.xz); float sp=length(w); float k=${sway === 1 ? '.0011' : '.0003'}*hy*hy/(1.+hy*.04)*(1.+sp*.02); wp.xz+=w*k*(.8+.2*sin(uTime*(1.3+hs)+hs*9.))+ (sp>18.?w/sp*sin(uTime*6.+wp.y)*.04*sp*hy*.02:vec2(0.));` : ''}
+    ${sway ? `
+#ifdef USE_COLOR
+    wp.xyz+=sin(uTime*(5.5+hs*3.)+dot(wp.xyz,vec3(.9,.7,1.3)))*.035*color.g*min(hy*.2,1.)*(.35+min(sp,40.)*.05);
+#endif
+` : ''}
     if(vFade<=0.) wp.xyz=base;
     vec4 mvPosition=viewMatrix*wp; gl_Position=projectionMatrix*mvPosition;`);
   sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vFade; float shIgnF2(vec2 p){ return fract(52.9829189*fract(dot(p,vec2(.06711056,.00583715)))); }').replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n if(vFade<.999&&shIgnF2(gl_FragCoord.xy)>vFade) discard;');
@@ -25,7 +31,8 @@ function uni(ctx, lod) { const g = ctx.globals; return { uWind: g.uWind, uGust: 
 export function createScatter(ctx, S, pool, tex) {
   const group = new THREE.Group(); group.name = 'scatter'; ctx.scene.add(group);
   const atlas = makeAtlas(); const Q = ctx.quality, treeMul = Q.trees ?? 1;
-  const R = Math.min(3300, 1500 + (Q.viewDist || 14000) * .08);
+  const R = Q.id === 'low' ? Math.min(3300, 1500 + (Q.viewDist || 9000) * .2) : Math.min(5200, 1500 + (Q.viewDist || 14000) * .22);
+  const IMP = Math.round(230 + 130 * Math.min(1.4, treeMul)); // mid-mesh -> impostor crossfade distance for trees
   // ---------- materials
   const mats = new Map();
   function vegMat(lod, sway, instanced = true) {
@@ -61,9 +68,51 @@ export function createScatter(ctx, S, pool, tex) {
     else if (K.cls === 'plant' || K.cls === 'rock' || nm === 'bale') { veg = true; sway = K.cls === 'plant' ? 2 : 0; near = [plantGeo(nm, 0)]; mid = plantGeo(nm, 1); }
     else if (K.cls === 'bld' || nm === 'tower') { near = [bldGeo(nm, 0, 0), bldGeo(nm, 0, 1), bldGeo(nm, 0, 2)]; mid = bldGeo(nm, 1, 0); }
     else { near = [propGeo(nm, 0)]; mid = K.lod[1] ? propGeo(nm, 1) : null; sway = nm === 'turbine' || nm === 'pumpjack' || nm === 'elevator' || nm === 'waterTower' ? 0 : 0; }
+    if (K.ext) { near = []; mid = null; }
     const lod = K.lod, mk = (l) => (veg ? vegMat(l, sway) : solidMat(l, sway));
-    return { K, veg, near, mid, mNear: mk([0, 0, 0, lod[0]]), mMid: mid ? mk([lod[0], K.cls === 'tree' ? 900 * treeMul : 0, 2600, lod[1] * (K.cls === 'tree' ? Math.min(1, treeMul) : 1)]) : null };
+    const v0 = { near, mid, mNear: mk([0, 0, 0, lod[0]]), mMid: mid ? mk([lod[0], K.cls === 'tree' ? 900 * treeMul : 0, 2600, lod[1] * (K.cls === 'tree' ? Math.min(1, treeMul) : 1)]) : null, row: -1, map: atlas };
+    return { K, veg, sway, vars: [v0], near, mid, mNear: v0.mNear, mMid: v0.mMid };
   });
+  const varOf = (A, seed) => (A.vars.length > 1 ? Math.floor(seed * 7919) % A.vars.length : 0);
+  // ---------- real models (async, fail-soft: kinds keep the procedural geometry if anything is missing)
+  let modelsOn = false, imp = null, impMat = null; const impFade = { value: new THREE.Vector4(IMP, R - 250, 1400, Math.max(2000, R - 600)) };
+  loadNature({ aniso: 4 }).then((map) => { try { applyModels(map); } catch (e) { console.warn('[nature] apply failed', e); } }).catch((e) => console.warn('[nature] load failed', e));
+  function applyModels(map) {
+    for (const [name, vs] of map) {
+      const kd = KI[name]; if (kd === undefined) continue; const A = arch[kd], K = A.K, lod = K.lod, tree = K.cls === 'tree';
+      A.vars = vs.map((v) => {
+        const mat = (l) => { const u = uni(ctx, new THREE.Vector4(...l)); const r = natureMaterial(v, { key: 's' + A.sway, foliage: K.cls !== 'rock', patch: (sh) => { Object.assign(sh.uniforms, u); patchVS(sh, A.sway, true); } }); r.u = u; return r; };
+        const near = [v.geos[0]]; if (tree) near.push(v.geos[2] || treeGeo(name, 0, true));
+        return { near, mid: v.geos[1] || v.geos[0], mNear: mat([0, 0, 0, lod[0]]), mMid: mat(tree ? [lod[0], 0, 0, lod[1]] : [lod[0], 0, 2600, lod[1]]), row: -1, map: v.map, H: v.H };
+      });
+      A.near = A.vars[0].near; A.mid = A.vars[0].mid; A.mNear = A.vars[0].mNear; A.mMid = A.vars[0].mMid;
+    }
+    modelsOn = true; for (const p of pools.values()) { group.remove(p.m); p.m.dispose(); } pools.clear();
+    for (const s of secs.values()) if (s.ready) s.dirty = true; dirtyNear = true; console.log('[nature] models applied: ' + [...map.keys()].join(','));
+  }
+  function setupImpostors() { // bake once the renderer exists; then tree mids stop at IMP and impostors take over
+    if (imp !== null || !modelsOn || !ctx.renderer) return; const list = [];
+    for (const A of arch) if (A.K.cls === 'tree') for (const v of A.vars) { if (!v.near[0]) continue; v.row = list.length; list.push({ geo: v.near[0], map: v.map }); }
+    try { imp = bakeImpostors(ctx.renderer, list, Q.id === 'low' ? 128 : 192); } catch (e) { console.warn('[nature] impostor bake failed', e); imp = null; }
+    if (!imp) { imp = false; return; } impMat = impostorMaterial(imp, uni(ctx, new THREE.Vector4()), impFade);
+    for (const A of arch) if (A.K.cls === 'tree') for (const v of A.vars) if (v.mMid) { const u = v.mMid.u || null; if (u) { u.uLod.value.y = 0; u.uLod.value.w = IMP + 30; } }
+    for (const s of secs.values()) if (s.ready) { s.dirty = true; markImp(s); }
+  }
+  // far field: one instanced impostor mesh per 4x4 sectors (2 km), rebuilt when a sector loads/drops/breaks
+  const impQuad = new THREE.PlaneGeometry(1, 1), impChunks = new Map(); let impN = 0;
+  const markImp = (s) => { const k = (s.j >> 2) * 64 + (s.i >> 2); let c = impChunks.get(k); if (!c) impChunks.set(k, c = { ci: s.i >> 2, cj: s.j >> 2, mesh: null, n: 0 }); c.dirty = true; };
+  function buildImpChunk(c) {
+    c.dirty = false; const P = [], Sx = [];
+    for (let j = c.cj * 4; j < c.cj * 4 + 4; j++) for (let i = c.ci * 4; i < c.ci * 4 + 4; i++) {
+      const s = secs.get(j * SGX + i); if (!s?.ready) continue; const it = s.items;
+      for (let k = 0; k < s.n; k++) { const o = k * STRIDE, A = arch[it[o]]; if (A.K.cls !== 'tree' || s.state[k]) continue; const v = A.vars[varOf(A, it[o + 7])]; if (v.row < 0) continue; P.push(it[o + 1], it[o + 2], it[o + 3], it[o + 6]); Sx.push(v.row, it[o + 4], it[o + 5], (it[o + 7] * 4099.37) % 1); }
+    }
+    if (c.mesh) { group.remove(c.mesh); c.mesh.geometry.dispose(); c.mesh = null; } impN -= c.n; c.n = P.length / 4; impN += c.n; if (!c.n) return;
+    const g = new THREE.InstancedBufferGeometry(); g.index = impQuad.index; g.setAttribute('position', impQuad.attributes.position); g.setAttribute('uv', impQuad.attributes.uv);
+    g.setAttribute('aIP', new THREE.InstancedBufferAttribute(new Float32Array(P), 4)); g.setAttribute('aIS', new THREE.InstancedBufferAttribute(new Float32Array(Sx), 4)); g.instanceCount = c.n;
+    const x0 = SOX + c.ci * 4 * SS, z0 = SOZ + c.cj * 4 * SS; g.boundingSphere = new THREE.Sphere(new THREE.Vector3(x0 + SS * 2, P[1] || 0, z0 + SS * 2), SS * 3.2 + 400);
+    const m = new THREE.Mesh(g, impMat); m.receiveShadow = true; m.castShadow = false; m.matrixAutoUpdate = false; group.add(m); c.mesh = m;
+  }
   // turbine rotors (animated, near+mid share one pool)
   const rotor = (() => { const g = new THREE.BufferGeometry(), p = [], n = []; for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a); const tip = [ca * 40, sa * 40], w = [-sa * 1.6, ca * 1.6]; p.push(w[0], w[1], 0, -w[0] * .5, -w[1] * .5, 0, tip[0], tip[1], 0); n.push(0, 0, 1, 0, 0, 1, 0, 0, 1); } g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3)); return g; })();
   const rotorMat = new THREE.MeshStandardMaterial({ color: 0xdcdde0, roughness: .5, side: THREE.DoubleSide, fog: false });
@@ -81,13 +130,13 @@ export function createScatter(ctx, S, pool, tex) {
     for (let k = 0; k < 64; k++) cnt[k + 1] += cnt[k]; const ref = new Int32Array(n), pos = cnt.slice(); for (let k = 0; k < n; k++) ref[pos[bin[k]]++] = k; s.bins = { off: cnt, ref }; s.x0 = x0; s.z0 = z0;
     // apply damage remembered from net / earlier visits
     const pend = pendingBroken.get(key); if (pend) { for (const [idx, lv] of pend) if (idx < n) s.state[idx] = Math.max(s.state[idx], lv); pendingBroken.delete(key); }
-    buildMids(s); s.wiresSrc = r.wires; buildWires(s); s.signs = r.signs.map((g) => makeSign(s, g)).filter(Boolean); dirtyNear = true;
+    s.treeMid = true; buildMids(s); markImp(s); s.wiresSrc = r.wires; buildWires(s); s.signs = r.signs.map((g) => makeSign(s, g)).filter(Boolean); dirtyNear = true;
   }
   function buildMids(s) {
     if (s.mids) for (const m of s.mids.values()) { group.remove(m); m.dispose(); }
-    s.mids = new Map(); const it = s.items, byK = new Map();
-    for (let k = 0; k < s.n; k++) { const kd = it[k * STRIDE]; if (!arch[kd].mid || s.state[k] > 0 && KIND[kd].cls !== 'bld') continue; if (s.state[k] > 1) continue; let a = byK.get(kd); if (!a) byK.set(kd, a = []); a.push(k); }
-    for (const [kd, a] of byK) { const A = arch[kd], m = new THREE.InstancedMesh(A.mid, A.mMid.m, a.length); m.customDepthMaterial = A.mMid.d; for (let q = 0; q < a.length; q++) m.setMatrixAt(q, itemMatrix(it, a[q] * STRIDE, M)); m.computeBoundingSphere(); m.castShadow = A.K.cls !== 'plant' && A.K.cls !== 'rock'; m.receiveShadow = true; m.matrixAutoUpdate = false; group.add(m); s.mids.set(kd, m); }
+    s.mids = new Map(); const it = s.items, byK = new Map(), noTree = imp && !s.treeMid;
+    for (let k = 0; k < s.n; k++) { const kd = it[k * STRIDE], A = arch[kd]; if (!A.mid || s.state[k] > 0 && KIND[kd].cls !== 'bld') continue; if (s.state[k] > 1) continue; if (noTree && A.K.cls === 'tree') continue; const key = kd * 8 + varOf(A, it[k * STRIDE + 7]); let a = byK.get(key); if (!a) byK.set(key, a = []); a.push(k); }
+    for (const [key, a] of byK) { const kd = key >> 3, A = arch[kd], V = A.vars[key & 7]; if (!V.mid) continue; const m = new THREE.InstancedMesh(V.mid, V.mMid.m, a.length); m.customDepthMaterial = V.mMid.d; for (let q = 0; q < a.length; q++) m.setMatrixAt(q, itemMatrix(it, a[q] * STRIDE, M)); m.computeBoundingSphere(); m.castShadow = A.K.cls !== 'plant' && A.K.cls !== 'rock'; m.receiveShadow = true; m.matrixAutoUpdate = false; m.userData.end = (A.K.cls === 'tree' && imp ? IMP + 30 : A.K.lod[1]) + SS * .75; group.add(m); s.mids.set(key, m); }
   }
   function buildWires(s) {
     if (s.wires) { group.remove(s.wires); s.wires.geometry.dispose(); s.wires = null; } const w = s.wiresSrc; if (!w || !w.length) return; const p = [];
@@ -105,21 +154,22 @@ export function createScatter(ctx, S, pool, tex) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(3.7, 2.05), new THREE.MeshStandardMaterial({ map: t, roughness: .45, fog: false, emissive: 0xffffff, emissiveMap: t, emissiveIntensity: 0 }));
     m.position.set(it[o + 1], it[o + 2] + 3.25, it[o + 3]); m.rotation.y = it[o + 4]; m.translateZ(.03); m.castShadow = true; m.userData.idx = g.i; group.add(m); return m;
   }
-  function dropSector(key) { const s = secs.get(key); if (!s) return; if (s.mids) for (const m of s.mids.values()) { group.remove(m); m.dispose(); } if (s.wires) { group.remove(s.wires); s.wires.geometry.dispose(); } if (s.signs) for (const m of s.signs) { group.remove(m); m.material.map.dispose(); m.geometry.dispose(); m.material.dispose(); } if (s.state && s.state.some((v) => v)) { const a = []; s.state.forEach((v, i) => v && a.push([i, v])); pendingBroken.set(key, a); } secs.delete(key); dirtyNear = true; }
+  function dropSector(key) { const s = secs.get(key); if (!s) return; if (s.mids) for (const m of s.mids.values()) { group.remove(m); m.dispose(); } if (s.wires) { group.remove(s.wires); s.wires.geometry.dispose(); } if (s.signs) for (const m of s.signs) { group.remove(m); m.material.map.dispose(); m.geometry.dispose(); m.material.dispose(); } if (s.state && s.state.some((v) => v)) { const a = []; s.state.forEach((v, i) => v && a.push([i, v])); pendingBroken.set(key, a); } secs.delete(key); markImp(s); dirtyNear = true; }
   const pendingBroken = new Map(); // sectorKey -> [[idx, level]]
   // ---------- near pools
   const pools = new Map(); let dirtyNear = true; const lastCam = new THREE.Vector3(1e9, 0, 0);
-  const poolFor = (kd, st) => { const key = kd * 4 + st; let p = pools.get(key); if (!p) { const A = arch[kd], g = A.near[Math.min(st, A.near.length - 1)]; if (!g) return null; const m = new THREE.InstancedMesh(g, A.mNear.m, 64); m.customDepthMaterial = A.mNear.d; m.count = 0; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; group.add(m); p = { m, n: 0 }; pools.set(key, p); } return p; };
+  const poolFor = (kd, st, vi) => { const key = (kd * 8 + vi) * 4 + st; let p = pools.get(key); if (!p) { const A = arch[kd], V = A.vars[vi] || A.vars[0], g = V.near[Math.min(st, V.near.length - 1)]; if (!g) return null; const m = new THREE.InstancedMesh(g, V.mNear.m, 64); m.customDepthMaterial = V.mNear.d; m.count = 0; m.frustumCulled = false; m.castShadow = true; m.receiveShadow = true; group.add(m); p = { m, n: 0 }; pools.set(key, p); } return p; };
   function rebuildNear() {
     const c = ctx.camera.position; for (const p of pools.values()) p.n = 0; let nr = 0;
     for (const s of secs.values()) {
       if (!s.ready) continue; const dx = Math.max(s.x0 - c.x, 0, c.x - s.x0 - SS), dz = Math.max(s.z0 - c.z, 0, c.z - s.z0 - SS), ds = Math.hypot(dx, dz), it = s.items;
       if (s.wires) s.wires.visible = ds < 380;
+      if (s.mids) for (const m of s.mids.values()) m.visible = ds < m.userData.end; const tm = ds < IMP + 60; if (imp && s.treeMid !== tm) { s.treeMid = tm; s.dirty = true; }
       if (ds > 900) { for (let k = 0; k < s.n; k++) { if (it[k * STRIDE] === KI.turbine && !s.state[k]) addRotor(it, k * STRIDE, nr++); } continue; }
       for (let k = 0; k < s.n; k++) {
         const o = k * STRIDE, kd = it[o], K = KIND[kd], ex = it[o + 1] - c.x, ez = it[o + 3] - c.z, d2 = ex * ex + ez * ez; if (kd === KI.turbine && !s.state[k]) addRotor(it, o, nr++);
         if (d2 > K.lod[0] * K.lod[0]) continue; const st = s.state[k]; if (st && (K.cls === 'prop' || K.cls === 'sign' || K.cls === 'plant' || K.cls === 'land' && kd !== KI.tower)) continue;
-        const p = poolFor(kd, st); if (!p) continue; if (p.n >= p.m.instanceMatrix.count) grow(p); p.m.setMatrixAt(p.n++, itemMatrix(it, o, M));
+        const p = poolFor(kd, st, varOf(arch[kd], it[o + 7])); if (!p) continue; if (p.n >= p.m.instanceMatrix.count) grow(p); p.m.setMatrixAt(p.n++, itemMatrix(it, o, M));
       }
     }
     for (const p of pools.values()) { p.m.count = p.n; p.m.instanceMatrix.needsUpdate = true; } rotors.count = Math.min(nr, 512); rotors.instanceMatrix.needsUpdate = true;
@@ -159,7 +209,7 @@ export function createScatter(ctx, S, pool, tex) {
   function setBroken(s, k, lv, vel, emit) {
     if (s.state[k] >= lv) return false; s.state[k] = lv; const o = k * STRIDE, it = s.items, K = KIND[it[o]], id = (s.j * SGX + s.i) * SEC_IDS + k;
     s.dirty = true; dirtyNear = true; if (K.name === 'pole') { s.wdirty = true; ctx.events.emit('world:powerflash', { x: it[o + 1], y: it[o + 2] + 9.5, z: it[o + 3] }); }
-    if (s.signs) for (const m of s.signs) if (m.userData.idx === k) m.visible = false;
+    if (s.signs) for (const m of s.signs) if (m.userData.idx === k) m.visible = false; if (K.cls === 'tree') markImp(s);
     const c = colCache.get(id); if (c) c.broken = true;
     if (emit) { ctx.events.emit('world:break', { kind: K.debris, id, level: lv, pos: new THREE.Vector3(it[o + 1], it[o + 2] + (K.col ? (K.col[0] === 'cyl' ? K.col[2] : K.col[2] * 2) * it[o + 6] * .6 : 1), it[o + 3]), vel: vel || new THREE.Vector3(), size: K.cls === 'bld' ? Math.max(K.col[1], K.col[3]) : 1 }); listeners.onBreak?.(id * 4 + lv); }
     return true;
@@ -181,7 +231,7 @@ export function createScatter(ctx, S, pool, tex) {
     rr++;
   }
   // flush dirty sectors (rebuild mids / wires) a few per frame
-  function flush() { let n = 0; for (const s of secs.values()) { if (!s.ready) continue; if (s.dirty && n < 3) { s.dirty = false; buildMids(s); n++; } if (s.wdirty) { s.wdirty = false; buildWires(s); } } }
+  function flush() { let n = 0; setupImpostors(); if (imp) { let b = 0; for (const c of impChunks.values()) if (c.dirty && b < 2) { buildImpChunk(c); b++; } } for (const s of secs.values()) { if (!s.ready) continue; if (s.dirty && n < 3) { s.dirty = false; buildMids(s); n++; } if (s.wdirty) { s.wdirty = false; buildWires(s); } } }
   const surfaceItems = (x, z, r, fn) => eachNear(x, z, r, (s, k) => fn(s.items, k * STRIDE, s.state[k]));
-  return { group, update: (dt) => { update(dt); flush(); }, near, queryColliders, hitCollider, applyBroken, damage, listeners, surfaceItems, stats: () => ({ sectors: secs.size, pools: pools.size }), arch };
+  return { group, update: (dt) => { update(dt); flush(); }, near, queryColliders, hitCollider, applyBroken, damage, listeners, surfaceItems, stats: () => ({ sectors: secs.size, pools: pools.size, impostors: impN, nature: modelsOn }), arch };
 }

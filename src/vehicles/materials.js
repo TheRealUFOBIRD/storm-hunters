@@ -137,12 +137,3 @@ export function lensMaterial(U, { color = 0xffffff, opacity = 0.16, rough = 0.02
 @`, '<color_fragment>': '@\n float gd=dirtMask(vOP,vON)*.6;diffuseColor.rgb=mix(diffuseColor.rgb,uMud,gd);diffuseColor.a=mix(diffuseColor.a,1.,gd*.8);',
   });
 }
-// cheap volumetric headlight cone (additive, fades with rain/fog uniform)
-export function coneMaterial() {
-  return new THREE.ShaderMaterial({
-    transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, uniforms: { uI: { value: 0 }, uCol: { value: new THREE.Color(1, 0.96, 0.88) }, uT: { value: 0 } },
-    vertexShader: 'varying vec3 vP;varying vec3 vN;varying vec3 vV;void main(){vP=position;vec4 mv=modelViewMatrix*vec4(position,1.);vN=normalize(normalMatrix*normal);vV=normalize(-mv.xyz);gl_Position=projectionMatrix*mv;}',
-    fragmentShader: NOISE + 'uniform float uI,uT;uniform vec3 uCol;varying vec3 vP;varying vec3 vN;varying vec3 vV;void main(){float l=clamp(-vP.z/18.,0.,1.);float e=pow(abs(dot(normalize(vN),vV)),1.6);float f=exp(-l*3.4)*smoothstep(0.,.02,l)*(1.-l);float st=.55+.75*smoothstep(.45,.8,vn3(vec3(vP.x*14.,vP.y*3.5+uT*16.,vP.z*9.)));gl_FragColor=vec4(uCol*uI*e*f*st*.5,1.);}',
-  });
-}
-export function glowMaterial(color) { return new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { uI: { value: 0 }, uCol: { value: new THREE.Color(color) }, uSize: { value: 1 } }, vertexShader: 'uniform float uSize;varying vec2 vU;void main(){vU=position.xy;vec4 mv=modelViewMatrix*vec4(0.,0.,0.,1.);float s=uSize*(1.+min(-mv.z*.01,1.5));mv.xy+=position.xy*s;mv.z+=.25;gl_Position=projectionMatrix*mv;}', fragmentShader: 'uniform float uI;uniform vec3 uCol;varying vec2 vU;void main(){float r=length(vU)*2.;float g=exp(-r*r*7.)+.25*exp(-r*r*55.)+.06*exp(-abs(vU.y)*60.)*(1.-smoothstep(.2,1.,r));gl_FragColor=vec4(uCol*uI*g*(1.-smoothstep(.75,1.,r)),1.);}' }); }

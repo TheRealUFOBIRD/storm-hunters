@@ -1,8 +1,8 @@
 // Road quality metrics (no three.js): profile smoothness along every road, road ribbon vs terrain (fine + coarse LOD grids),
-// junction coverage. node tools/roadmetrics.mjs [--json]
+// junction coverage. node tests/roadmetrics.mjs [--json]
 import { buildWorldData } from '../src/world/build.js';
 import { makeSampler } from '../src/world/sampler.js';
-import { XS, YS, CROWN } from '../src/world/sampler.js';
+import { XS, YS, CROWN, herm } from '../src/world/sampler.js';
 
 export function roadMetrics(data, S, { stride = 1, lods = [1, 4, 8, 16] } = {}) {
   const roads = data.roads, out = { smooth: {}, poke: {}, worst: {} };
@@ -12,7 +12,7 @@ export function roadMetrics(data, S, { stride = 1, lods = [1, 4, 8, 16] } = {}) 
   for (const r of roads) {
     if (r.id % stride) continue; const K = r.kind, st = out.smooth[K] ||= { n: 0, max: 0, over: 0, grade: 0 }; const lane = r.k === 0 ? 5.6 : r.k === 3 ? 1.4 : 1.9;
     const hs = []; for (let sv = 0; sv <= r.len; sv += 2) { at(r, sv, o); hs.push(S.heightAt(o.x, o.z)); }
-    for (let i = 2; i + 2 < hs.length; i++) { const d2 = Math.abs(hs[i + 2] - 2 * hs[i] + hs[i - 2]) / 16, g = Math.abs(hs[i + 1] - hs[i - 1]) / 4; st.n++; if (d2 > .02) st.over++; if (g > st.grade) st.grade = g; if (d2 > st.max) { st.max = d2; at(r, i * 2, o); out.worst['smooth_' + K] = { road: r.id, name: r.name, s: i * 2, x: Math.round(o.x), z: Math.round(o.z) }; } }
+    for (let i = 2; i + 2 < hs.length; i++) { const d2 = Math.abs(hs[i + 2] - 2 * hs[i] + hs[i - 2]) / 16, g = Math.abs(hs[i + 1] - hs[i - 1]) / 4; st.n++; if (d2 > .02) st.over++; if (g > st.grade) { st.grade = g; at(r, i * 2, o); out.worst['grade_' + K] = { road: r.id, x: Math.round(o.x), z: Math.round(o.z) }; } if (d2 > st.max) { st.max = d2; at(r, i * 2, o); out.worst['smooth_' + K] = { road: r.id, name: r.name, s: i * 2, x: Math.round(o.x), z: Math.round(o.z) }; } }
     void lane;
   }
   // 2) ribbon vs terrain. Mesh vertex height = lerp(y) - CROWN*min(|u|,hw) + YS; only surface columns (|u| <= hw).
@@ -27,7 +27,7 @@ export function roadMetrics(data, S, { stride = 1, lods = [1, 4, 8, 16] } = {}) 
       if (r.br[q] | r.br[q + 1]) continue;
       const ax = p[q * 2], az = p[q * 2 + 1], bx = p[q * 2 + 2], bz = p[q * 2 + 3], L = Math.hypot(bx - ax, bz - az), tx = (bx - ax) / L, tz = (bz - az) / L;
       for (let f = .25; f < 1; f += .5) {
-        const x = ax + (bx - ax) * f, z = az + (bz - az) * f, y = r.y[q] + (r.y[q + 1] - r.y[q]) * f;
+        const x = ax + (bx - ax) * f, z = az + (bz - az) * f, y = herm(r.y[q], r.y[q + 1], r.m[q] * L, r.m[q + 1] * L, f); // same cubic as roadmesh.js
         for (let c = 0; c < xs.length; c++) {
           const u = xs[c]; if (Math.abs(u) > r.hw + .01) continue; const X = x - tz * u, Z = z + tx * u;
           if (S.otherEdge(X, Z, r.id) < (r.k === 2 ? .15 : -.6)) continue; // fragment discarded: another road owns it

@@ -17,7 +17,7 @@ const cub = (a, b, c, d, t) => b + .5 * t * (c - a + t * (2 * a - 5 * b + 4 * c 
 // EDGE: flat graded footprint (axis distance) per class; HWK: paved half width; PRI: blend priority outside footprints;
 // FP: dominance inside a footprint (a higher class footprint always owns a junction); SURF: half width of the drawn top
 // surface (street incl. sidewalk); SKIRT: where the ribbon skirt reaches the ground; SINK: terrainAt drop under ribbons
-export const EDGE = [12.7, 7.2, 7.8, 4.6], HWK = [10.2, 5.2, 5, 3.6], INFK = [100, 90, 34, 34];
+export const EDGE = [12.7, 7.2, 9, 4.6], HWK = [10.2, 5.2, 5, 3.6], INFK = [100, 90, 34, 34];
 const PRI = [64, 16, 1, 4], FP = [1e8, 1e6, 1e2, 1e4], SURF = [10.2, 5.2, 7.45, 0], SKIRT = [11.3, 6.3, 7.6, 0], SINK = .16;
 // cubic Hermite road profile on a segment: y0,y1 heights, m0,m1 tangents (height per unit t)
 export const herm = (y0, y1, m0, m1, t) => { const t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0 + (3 * t2 - 2 * t3) * y1 + (t3 - t2) * m1; };
@@ -29,6 +29,7 @@ export function makeSampler(data) {
   // outputs of last height call: signed distances to road edges (by class) and river bank
   const O = { eMaj: 99, eGrv: 99, eStr: 99, eRiv: 999, rivY: -Infinity, rough: 0, mesa: 0, deck: false };
   const P = { h: 0, rough: 0, mesa: 0, roll: 0 };
+  const CW = new Float64Array(8), CF = new Float64Array(8), CY = new Float64Array(8), CO = new Float64Array(8);
   function macro(x, z) {
     let u = (x - OX) / CELL, v = (z - OZ) / CELL; u = u < 1 ? 1 : u > GX - 2.001 ? GX - 2.001 : u; v = v < 1 ? 1 : v > GZ - 2.001 ? GZ - 2.001 : v;
     const i = u | 0, j = v | 0, a = u - i, b = v - j, k = (j * GX + i) * 4, r = GX * 4;
@@ -82,7 +83,7 @@ export function makeSampler(data) {
     const c = cj * RGX + ci, off = segIdx.off, e1 = off[c + 1]; let q = off[c]; if (q === e1) return h; const ref = segIdx.ref;
     // Only the nearest segment of each road counts (segments of one road are contiguous in the cell list): blending a
     // road's other segments in used their clamped end heights and biased the surface on vertical curves (bumps).
-    let ws = 0, ys = 0, wm = 0, em = 99, dk = -1e9, sk = 0, cr = -1, bd = 1e18, bs = -1, bt = 0, nd = 1e18, ns = -1, nt = 0;
+    let fmin = 1e9, ws = 0, ys = 0, nc = 0, own = 1e9, wm = 0, em = 99, dk = -1e9, sk = 0, cr = -1, bd = 1e18, bs = -1, bt = 0, nd = 1e18, ns = -1, nt = 0;
     for (; ; q++) {
       const s = q < e1 ? ref[q] : -1, r = s < 0 ? -2 : SR[s];
       if (r !== cr) {
@@ -98,8 +99,8 @@ export function makeSampler(data) {
             let w = 1; if (e > 0) { const df = ry > h ? ry - h : h - ry, mx = inf - EDGE[k], bw = k > 1 ? Math.min(mx, 9 + df * 1.6) : Math.min(mx, 16 + 2.4 * df); if (e >= bw) w = 0; else { const f = e / bw; w = 1 - f * f * (3 - 2 * f); } }
             if (w > 0) {
               if (k !== 2 && e < em) em = e; else if (k === 2 && e < 0) em = -1;
-              const w2 = w * w, w4 = w2 * w2 * PRI[k] + (e < 1.5 ? FP[k] * (e <= 0 ? 1 : 1 - sst(0, 1.5, e)) : 0); ws += w4; ys += w4 * ry; if (w > wm) wm = w;
-              if (k < 3) { const v = d - SURF[k], g = v <= 0 ? 1 : 1 - sst(0, (SKIRT[k] - SURF[k]) * .6, v); if (g > sk) sk = g; } // under a drawn ribbon
+              const w2 = w * w, fp = e < 1.5 ? FP[k] * (e <= 0 ? 1 : 1 - sst(0, 1.5, e)) : 0; if (nc < 8) { CW[nc] = w2 * w2 * PRI[k]; CF[nc] = fp; CY[nc] = ry; CO[nc] = k * 65536 + cr; nc++; } if (fp > 0 && k * 65536 + cr < own) own = k * 65536 + cr; if (w > wm) wm = w;
+              if (k < 3) { if (d < SURF[k] + .5 && ry < fmin) fmin = ry; const v = d - SURF[k], g = v <= 0 ? 1 : 1 - sst(0, (SKIRT[k] - SURF[k]) * .6, v); if (g > sk) sk = g; } // under a drawn ribbon
             }
           }
         }
@@ -109,11 +110,12 @@ export function makeSampler(data) {
       const ex = px - dx * t, ez = pz - dz * t, d2 = ex * ex + ez * ez;
       if (d2 < bd) { bd = d2; bs = s; bt = t; } if (!SB[s] && d2 < nd) { nd = d2; ns = s; nt = t; }
     }
+    for (let i = 0; i < nc; i++) { const v = CW[i] + CF[i] * (CO[i] === own ? 100 : 1); ws += v; ys += v * CY[i]; } // junction owner: highest class, then earliest road
     if (ws > 0) { h += (ys / ws - h) * wm; if (em > 0 && em < 8) { const f = em / 8; h -= .95 * 6.75 * f * (1 - f) * (1 - f); } }
     if (dk > -1e8 && dk > h - .5) { O.deck = true; return dk; }
     // terrainAt (render/placement ground) sits SINK below the ribbon so coarse terrain LODs never poke through it;
     // heightAt (physics) stays exactly on the road surface
-    return deck ? h : h - sk * SINK;
+    return deck ? h : (h < fmin ? h : fmin) - sk * SINK; // under overlapping ribbons: below the lowest one
   }
   const heightAt = (x, z) => grade(x, z, groundAt(x, z), true);
   const terrainAt = (x, z) => grade(x, z, groundAt(x, z), false);
