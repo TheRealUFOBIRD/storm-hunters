@@ -66,7 +66,8 @@ export class StormUniforms {
       const dust = t.dust ?? 0.5, dh = Math.min(lcl * 0.34, dustR * (0.3 + 0.42 * str));
       T.uT0.value[i].set(t.x, t.z, y0, lcl); T.uT1.value[i].set(Rm, Math.max(ext, dust > 0.01 ? dustR * 3.2 : 0), vm, rough); T.uT2.value[i].set(dustR, dust, dh, m.rot);
       const c = t.dustColor || [0.42, 0.3, 0.2]; T.uT3.value[i].set(c[0], c[1], c[2], hash(t.seed || 1));
-      let mv = 0; for (let k = 0; k < 4; k++) { const s = t.sub?.[k]; if (s) { T.uSub.value[i * 4 + k].set(s.a, s.r, s.s ?? 1, Math.max(3, s.rc || 20)); mv = Math.max(mv, s.s ?? 1); } else T.uSub.value[i * 4 + k].set(0, 1, 0, 1); }
+      let mv = 0, se = 0; for (let k = 0; k < 4; k++) { const s = t.sub?.[k]; if (s) { const rcs = Math.max(3, s.rc || 20); T.uSub.value[i * 4 + k].set(s.a, s.r, s.s ?? 1, rcs); mv = Math.max(mv, s.s ?? 1); se = Math.max(se, (s.r || 0) + rcs * 6 + 40); } else T.uSub.value[i * 4 + k].set(0, 1, 0, 1); }
+      if (mv > 0) T.uT1.value[i].y = Math.max(T.uT1.value[i].y, se);
       T.uT4.value[i].set(rc, m.up, t.spin || 1, mv);
     }
     if (nt) this.tex.needsUpdate = true;

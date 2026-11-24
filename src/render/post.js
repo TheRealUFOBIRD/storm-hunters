@@ -48,19 +48,14 @@ vec3 skyColor(vec3 ro,vec3 rd,float disk){
 }
 `;
 const COMPOSITE = HEAD + DEPTH_GLSL + SKY_GLSL + SKYCOL_GLSL + /* glsl */`
-in vec2 vUv; out vec4 o; uniform sampler2D uColor,uDepth,uAo,uVol,uVolD,uBlue; uniform vec4 uDepthK; uniform mat4 uInvVP; uniform vec3 uCam,uFwd; uniform vec2 uVolRes; uniform float uAoOn,uFrame; uniform vec4 uFlashSky; uniform vec3 uFlashCol;
+in vec2 vUv; out vec4 o; uniform sampler2D uColor,uDepth,uAo,uVol,uVolD,uBlue; uniform vec4 uDepthK; uniform mat4 uInvVP,uCurVP; uniform vec3 uCam,uFwd; uniform vec2 uVolRes; uniform float uAoOn,uFrame; uniform vec4 uFlashSky; uniform vec3 uFlashCol;
 void main(){
   vec4 w=uInvVP*vec4(vUv*2.-1.,.5,1.); vec3 rd=normalize(w.xyz/w.w-uCam); float raw=textureLod(uDepth,vUv,0.).r; float z=shLinearDepth(raw,uDepthK); float d=z/max(dot(rd,uFwd),.05);
   vec3 c; bool sky=z>59000.;
   if(sky) c=skyColor(uCam,rd,1.); else { c=min(textureLod(uColor,vUv,0.).rgb,vec3(400.)); if(uAoOn>.5){ float ao=textureLod(uAo,vUv,0.).r; float l=lum(c); c*=mix(ao,1.,sat(l*.06)); } vec4 ap=aerial(uCam,rd,d); c=c*pow(vec3(ap.a),vec3(.82,1.,1.2))+ap.rgb; }
-  // depth-aware upsample of the half-res volume
-  vec2 p=vUv*uVolRes-.5; vec2 f=fract(p); ivec2 b=ivec2(floor(p)); ivec2 mx=ivec2(uVolRes)-1; vec4 s=vec4(0.); float ws=0.; float md=min(d,60000.);
-  vec4 best=vec4(0.,0.,0.,1.); float be=1e9; float bcd=0.;
-  for(int i=0;i<4;i++){ ivec2 q=ivec2(i&1,i>>1); ivec2 t=clamp(b+q,ivec2(0),mx); vec4 v=texelFetch(uVol,t,0); vec2 vd=texelFetch(uVolD,t,0).xy; float er=abs(log2(max(vd.y,.5)/max(md,.5)));
-    // a sample that saw further than us and whose cloud lies behind us contributes nothing here
-    if(vd.y>md*1.15){ float k=smoothstep(md*1.35,md*.6,vd.x); v=mix(vec4(0.,0.,0.,1.),v,k); er*=.35+.65*k; }
-    float bw=(q.x==1?f.x:1.-f.x)*(q.y==1?f.y:1.-f.y); float wg=(bw+1e-3)*exp(-er*9.)+1e-6*bw; s+=v*wg; ws+=wg; if(er<be){ be=er; best=v; } }
-  vec4 v=be>.9?best:s/max(ws,1e-8);
+  // the volume is already resolved at full resolution in the un-jittered frame: fetch it where this ray lands
+  vec4 pc=uCurVP*vec4(uCam+rd*100.,1.); vec2 vu=pc.xy/pc.w*.5+.5;
+  vec4 v=textureLod(uVol,clamp(vu,.5/uVolRes,1.-.5/uVolRes),0.);
   c=c*v.a+v.rgb;
   o=vec4(max(c,vec3(0.)),1.);
 }`;
@@ -146,7 +141,7 @@ export class Post {
     this.skyU = sky;
     this.mAo = fsMaterial(AO, { uDepth: { value: null }, uDepthK: s.depthK, uProjK: { value: new THREE.Vector4() }, uRes: { value: V2() }, uFrame: { value: 0 } });
     this.mAoB = fsMaterial(AOBLUR, { uT: { value: null }, uDir: { value: V2() } });
-    this.mComp = fsMaterial(COMPOSITE, { ...cam, ...sky, uColor: { value: null }, uDepth: { value: null }, uAo: { value: null }, uVol: { value: null }, uVolD: { value: null }, uBlue: { value: s.blue }, uVolRes: { value: V2() }, uAoOn: { value: 1 }, uFrame: { value: 0 }, uFlashSky: { value: new THREE.Vector4() }, uFlashCol: { value: new THREE.Vector3() } });
+    this.mComp = fsMaterial(COMPOSITE, { ...cam, ...sky, uCurVP: s.curVP, uColor: { value: null }, uDepth: { value: null }, uAo: { value: null }, uVol: { value: null }, uVolD: { value: null }, uBlue: { value: s.blue }, uVolRes: { value: V2() }, uAoOn: { value: 1 }, uFrame: { value: 0 }, uFlashSky: { value: new THREE.Vector4() }, uFlashCol: { value: new THREE.Vector3() } });
     this.mTaa = fsMaterial(TAA, { ...cam, uCur: { value: null }, uHist: { value: null }, uDepth: { value: null }, uVolD: { value: null }, uVol: { value: null }, uRes: { value: V2() }, uJit: { value: V2() }, uPrevVP: { value: new THREE.Matrix4() }, uReset: { value: 1 } });
     this.mCopy = fsMaterial(COPY, { uT: { value: null }, uDepth: { value: null } }, { depthWrite: true });
     this.mBlit = fsMaterial(BLIT, { uT: { value: null } });
@@ -163,15 +158,18 @@ export class Post {
   }
   resize(w, h) {
     if (this.w === w && this.h === h) return; this.w = w; this.h = h;
-    for (const t of [this.ao0, this.ao1, this.comp, this.hist0, this.hist1, this.hdr, this.ldr, ...(this.mips || [])]) t?.dispose();
+    const oldH = this.hist0;
+    for (const t of [this.ao0, this.ao1, this.comp, this.hist1, this.hdr, this.ldr, ...(this.mips || [])]) t?.dispose();
     const hw = Math.ceil(w / 2), hh = Math.ceil(h / 2);
     this.ao0 = hdrRT(hw, hh, { format: THREE.RGFormat }); this.ao1 = hdrRT(hw, hh, { format: THREE.RGFormat });
     this.comp = hdrRT(w, h); this.hist0 = hdrRT(w, h); this.hist1 = hdrRT(w, h);
+    // resample the TAA history on (dynamic) resolution changes rather than restarting from an aliased frame
+    if (oldH) { this.mBlit.uniforms.uT.value = oldH.texture; draw(this.r, this.mBlit, this.hist0); oldH.dispose(); }
     const d = new THREE.DepthTexture(w, h, THREE.FloatType); d.format = THREE.DepthFormat;
     this.hdr = hdrRT(w, h, { extra: { depthBuffer: true, depthTexture: d } });
     this.ldr = new THREE.WebGLRenderTarget(w, h, { depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: false });
     this.mips = []; let mw = w, mh = h; for (let i = 0; i < 6; i++) { mw = Math.max(1, mw >> 1); mh = Math.max(1, mh >> 1); this.mips.push(hdrRT(mw, mh)); }
-    this.reset = true;
+    if (!oldH) this.reset = true;
   }
   ao(depth, P, frame) {
     const u = this.mAo.uniforms; u.uDepth.value = depth; u.uRes.value.set(this.ao0.width, this.ao0.height); u.uFrame.value = frame % 64; u.uProjK.value.set(1 / P[0], 1 / P[5], P[8], P[9]);

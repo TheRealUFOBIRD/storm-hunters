@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { L } from './textures.js';
 import { TERRAIN_COMMON } from './terrain.js';
+import { XS, YS, CROWN } from './sampler.js';
 export const SS = 512, SOX = -51200, SOZ = -32768, SGX = 200, SGZ = 128;
 
 export function createRoadMaterial(ctx, tex, shared, far) {
@@ -65,8 +66,6 @@ export function createRoads(ctx, S, tex, shared) {
   for (let i = 0; i < SGX * SGZ; i++) cnt[i + 1] += cnt[i]; const ref = new Int32Array(cnt[SGX * SGZ]), pos = cnt.slice(); for (let i = 0; i < seg.n; i++) if (secOf[i] >= 0) ref[pos[secOf[i]]++] = i;
   const tan = (r, i, o) => { const p = r.pts, n = p.length / 2, a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let x = p[b * 2] - p[a * 2], z = p[b * 2 + 1] - p[a * 2 + 1]; const l = Math.sqrt(x * x + z * z) || 1; o.x = x / l; o.z = z / l; };
   const T0 = { x: 0, z: 0 }, T1 = { x: 0, z: 0 };
-  const XS = [[-11.3, -10.2, -5, 0, 5, 10.2, 11.3], [-6.3, -5.2, -2.6, 0, 2.6, 5.2, 6.3], [-7.6, -7.45, -5.1, -5, 0, 5, 5.1, 7.45, 7.6]];
-  const YS = [[-.32, .015, .03, .04, .03, .015, -.32], [-.32, .015, .03, .04, .03, .015, -.32], [-.4, .15, .15, .0, .03, .0, .15, .15, -.4]];
   let P = [], A = [], NR = [], IX = [];
   function emit(i) {
     const r = roads[seg.R[i]], q = seg.I[i], p = r.pts, k = r.k, xs = XS[k], ys = YS[k], m = xs.length; tan(r, q, T0); tan(r, q + 1, T1); const ax = p[q * 2], az = p[q * 2 + 1], bx = p[q * 2 + 2], bz = p[q * 2 + 3], ya = r.y[q], yb = r.y[q + 1], s0 = r.s[q], s1 = r.s[q + 1];

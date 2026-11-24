@@ -39,7 +39,7 @@ export class VehicleBody {
     this.abs = true; this.tc = true; this.absActive = false; this.tcActive = false;
     this.damage = 0; this.fuel = 1; this.anchored = false; this.anchorK = 0; this.anchors = null; this.windLoad = 0; this.windU = [0, 0, 0, 0, 0, 0, 0, 0, 0]; this.windSpeed = 0; this.occupied = false;
     this.flipped = false; this.airborne = false; this.airTime = 0; this.asleep = false; this.sleepT = 0; this.upY = 1; this.speed = 0; this.vLong = 0; this.vLat = 0; this.engineOn = true; this.waterDepth = 0;
-    this.accLocal = new Vector3(); this.gForce = new Vector3(); this.onImpact = null; this.colliders = []; this.contactN = 0; this.scrape = 0; this.powerMul = 1; this.gripMul = 1; this.massMul = 1;
+    this.accLocal = new Vector3(); this.gForce = new Vector3(); this.onImpact = null; this.colliders = []; this.contactN = 0; this.scrape = 0; this.powerMul = 1; this.gripMul = 1; this.massMul = 1; this.looseMul = 1; this.armorMul = 1; this.fuelMul = 1; this.holdMul = 1;
     const a = this;
     this.wheels = [0, 1, 2, 3].map((i) => {
       const w = new Wheel(i), front = i < 2, R = s.R, fr = front ? s.susp.fF : s.susp.fR;
@@ -97,7 +97,7 @@ export class VehicleBody {
     this.w.x += I[0] * tx + I[1] * ty + I[2] * tz; this.w.y += I[3] * tx + I[4] * ty + I[5] * tz; this.w.z += I[6] * tx + I[7] * ty + I[8] * tz;
     this.wake();
   }
-  addDamage(d) { const o = this.damage; this.damage = clamp(o + d * (1 - this.spec.armor * 0.85)); return this.damage - o; }
+  addDamage(d) { const o = this.damage; this.damage = clamp(o + d * (1 - this.spec.armor * 0.85) * this.armorMul); return this.damage - o; }
 
   // --- per frame ---
   update(dt) {
@@ -121,6 +121,7 @@ export class VehicleBody {
       w.surface = sf.type; w.rollRes = sf.rollRes; w.bump = sf.bump || 0; w.dust = sf.dust || 0;
       let g = lerp(sf.grip, sf.wetGrip ?? sf.grip * 0.75, wet);
       if (wet > 0.45 && sf.type === 'asphalt') { const v = Math.abs(this.vLong), crit = 30 + 10 * (w.Fz0 / 6000); g *= 1 - 0.5 * smoothstep(crit - 8, crit + 14, v) * smoothstep(0.45, 1, wet); }
+      if (sf.type !== 'asphalt' && sf.type !== 'concrete') g *= this.looseMul;
       w.grip = g;
       w.water = 0; const wl = W.waterLevelAt ? W.waterLevelAt(wx, wz) : -Infinity; if (wl > -1e5) w.water = Math.max(0, wl - W.heightAt(wx, wz)); w.wl = wl;
     }
@@ -155,7 +156,7 @@ export class VehicleBody {
       this.accLocal.x += (M[0] * ax + M[3] * ay + M[6] * az - this.accLocal.x) * k; this.accLocal.y += (M[1] * ax + M[4] * ay + M[7] * az - this.accLocal.y) * k; this.accLocal.z += (M[2] * ax + M[5] * ay + M[8] * az - this.accLocal.z) * k;
       this._prevV.copy(this.v);
     }
-    if (this.occupied && this.engineOn) { const P = Math.abs(this.throttle) * s.power; this.fuel = Math.max(0, this.fuel - dt * (0.00004 + P * 2.6e-7 * (60 / s.fuelCap))); }
+    if (this.occupied && this.engineOn) { const P = Math.abs(this.throttle) * s.power; this.fuel = Math.max(0, this.fuel - dt * (0.00004 + P * 2.6e-7 * (60 / s.fuelCap)) / this.fuelMul); }
     const a = this.anchored ? 1 : 0; this.anchorK += clamp(a - this.anchorK, -dt * 0.55, dt * 0.55);
     this.scrape *= Math.exp(-dt * 6);
   }
@@ -353,7 +354,7 @@ export class VehicleBody {
     }
     // wake / tumbling angular drag
     const wl = this.w; const ka = 0.5 * RHO * a.side * s.L * s.L * 0.02 * wl.length(); T[0] -= wl.x * ka; T[1] -= wl.y * ka; T[2] -= wl.z * ka;
-    const W0 = s.mass * G, hold = an ? k * an.hold : 0, cap = Math.max(0.15 * W0, 0.8 * (W0 + hold - Math.max(0, lift))), roll = (side * (a.h * (1 - 0.35 * k)) + Math.max(0, lift) * s.W * 0.67) / ((W0 + hold) * s.trackF * 0.5);
+    const W0 = s.mass * G, hold = an ? k * an.hold * this.holdMul : 0, cap = Math.max(0.15 * W0, 0.8 * (W0 + hold - Math.max(0, lift))), roll = (side * (a.h * (1 - 0.35 * k)) + Math.max(0, lift) * s.W * 0.67) / ((W0 + hold) * s.trackF * 0.5);
     const wlT = Math.max(side / cap, roll); this.windLoad += (wlT - this.windLoad) * 0.02; this.windSide = side; this.windLift = lift;
   }
   water(F, T, dt) {
@@ -375,7 +376,7 @@ export class VehicleBody {
       if (fy > 0) fy *= 0.15; const f = Math.hypot(fx, fy, fz); mx = Math.max(mx, f);
       F[0] += fx; F[1] += fy; F[2] += fz; T[0] += ry * fz - rz * fy; T[1] += rz * fx - rx * fz; T[2] += rx * fy - ry * fx;
     }
-    this.anchorStress = mx / (s.anchor.hold / 2); if (this.anchorStress > 1) { this.anchored = false; this.anchors = null; this.anchorBroke = true; }
+    this.anchorStress = mx / (s.anchor.hold * this.holdMul / 2); if (this.anchorStress > 1) { this.anchored = false; this.anchors = null; this.anchorBroke = true; }
   }
   invK(rx, ry, rz, nx, ny, nz) {
     const I = this.Iw, cx = ry * nz - rz * ny, cy = rz * nx - rx * nz, cz = rx * ny - ry * nx, ax = I[0] * cx + I[1] * cy + I[2] * cz, ay = I[3] * cx + I[4] * cy + I[5] * cz, az = I[6] * cx + I[7] * cy + I[8] * cz;

@@ -13,6 +13,8 @@ import { CSM, csmU, patchChunks } from './csm.js';
 const halton = (i, b) => { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = Math.floor(i / b); } return r; };
 const JIT = [...Array(16)].map((_, i) => [halton(i + 1, 2) - 0.5, halton(i + 1, 3) - 0.5]);
 const clamp = THREE.MathUtils.clamp, smooth = THREE.MathUtils.smoothstep;
+// raymarch resolution relative to the render resolution (the resolve reconstructs full resolution)
+const VOL_SCALE = { low: 0.34, medium: 0.4, high: 0.5, ultra: 0.7 };
 const PIXEL_CAP = { low: 1.1e6, medium: 2.1e6, high: 3.7e6, ultra: 8.3e6 };
 const PROBE = HEAD + SKY_GLSL + /* glsl */`
 in vec2 vUv; out vec4 o; uniform sampler2D uEnv,uCs; uniform vec4 uCsXf; uniform vec3 uCam,uSunDir; uniform float uGround;
@@ -35,7 +37,8 @@ export async function create(ctx) {
   const atm = new Atmosphere(renderer), SU = new StormUniforms(ctx);
   const depthK = { value: new THREE.Vector4() }, invVP = { value: new THREE.Matrix4() }, camPos = { value: new THREE.Vector3() }, fwd = { value: new THREE.Vector3() }, groundRad = { value: new THREE.Vector3(0.1, 0.1, 0.1) }, resolution = { value: new THREE.Vector2(1, 1) };
   const stormMap = new StormMap(renderer, noise, SU.stormU, q0.id === 'low' ? 512 : 1024);
-  const shared = { atm, atmU: atm.u, stormU: SU.stormU, torU: SU.torU, noise, blue, depthK, invVP, cam: camPos, fwd, groundRad, csTex: stormMap.csTex };
+  const curVPu = { value: new THREE.Matrix4() }, invVPu = new THREE.Matrix4();
+  const shared = { curVP: curVPu, atm, atmU: atm.u, stormU: SU.stormU, torU: SU.torU, noise, blue, depthK, invVP, cam: camPos, fwd, groundRad, csTex: stormMap.csTex };
   atm.initAerial(stormMap.csTex.value, stormMap.csXf, camPos.value);
   const vol = new Volume(renderer, shared), post = new Post(renderer, shared), csm = new CSM(renderer, ctx), pmrem = new THREE.PMREMGenerator(renderer);
   vol.u.uM0.value = stormMap.rt.textures[0]; vol.u.uM1.value = stormMap.rt.textures[1]; vol.u.uXf.value = stormMap.xf; vol.u.uCsXf.value = stormMap.csXf;
@@ -54,7 +57,7 @@ export async function create(ctx) {
   const flashes = [], lens = { mud: 0, rain: 0 };
   const stats = { gpuMs: 0, cpuMs: 0, drawCalls: 0, tris: 0, fps: 60, scale: 1, width: 0, height: 0, reversed };
 
-  function setSizes() {
+  function setSizes(fromDyn = false) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2), cw = Math.max(2, Math.round(innerWidth * dpr)), ch = Math.max(2, Math.round(innerHeight * dpr));
     let sc = q.pixelRatio * clamp(ctx.settings.get('resolution') || 1, 0.4, 2) * dyn; const cap = PIXEL_CAP[q.id] || 3.7e6; const px = cw * ch * sc * sc; if (px > cap) sc *= Math.sqrt(cap / px);
     if (W !== cw || H !== ch) { W = cw; H = ch; renderer.setSize(W, H, false); }
@@ -63,15 +66,15 @@ export async function create(ctx) {
       RW = rw; RH = rh; if (sceneRT) { sceneRT.depthTexture.dispose(); sceneRT.dispose(); }
       const d = new THREE.DepthTexture(RW, RH, THREE.FloatType); d.format = THREE.DepthFormat;
       sceneRT = new THREE.WebGLRenderTarget(RW, RH, { type: THREE.HalfFloatType, depthTexture: d, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter, generateMipmaps: false, samples: 0 });
-      post.resize(RW, RH); gfx.depthTexture.value = d; bigReset = true;
+      post.resize(RW, RH); gfx.depthTexture.value = d; if (!fromDyn) bigReset = true;
     }
-    vol.resize(Math.round(RW * q.volScale), Math.round(RH * q.volScale));
+    const vs = VOL_SCALE[q.id] ?? q.volScale;
+    vol.resize(Math.round(RW * vs), Math.round(RH * vs), RW, RH);
     resolution.value.set(RW, RH); stats.width = RW; stats.height = RH; stats.scale = sc;
   }
   function applyQuality() {
     q = ctx.quality; csm.setQuality(q, ctx.settings.get('shadows'));
-    vol.u.uSteps.value = Math.round(q.volSteps * 1.3); vol.u.uLSteps.value = q.lightSteps; vol.u.uQual.value = clamp(105 / q.volSteps, 0.75, 1.9);
-    setSizes();
+    applySteps(); setSizes();
   }
   ctx.events.on('quality:changed', applyQuality);
   ctx.events.on('settings:changed', (e) => { if (['resolution', 'dynamicRes'].includes(e.key)) { if (e.key === 'dynamicRes' && !e.value) dyn = 1; setSizes(); } if (e.key === 'shadows') csm.setQuality(q, e.value); });
@@ -111,14 +114,23 @@ export async function create(ctx) {
   const tEnd = () => { if (tqA) { gl.endQuery(tq.TIME_ELAPSED_EXT); tqP.push(tqA); tqA = null; } if (tqP.length && gl.getQueryParameter(tqP[0], gl.QUERY_RESULT_AVAILABLE)) { const ms = gl.getQueryParameter(tqP[0], gl.QUERY_RESULT) / 1e6; gl.deleteQuery(tqP.shift()); if (!gl.getParameter(tq.GPU_DISJOINT_EXT)) stats.gpuMs += (ms - stats.gpuMs) * 0.1; } };
 
   // ---- dynamic resolution ----
-  let drAcc = 0, drN = 0, drHold = 3, drBad = 9;
+  let drAcc = 0, drN = 0, drHold = 3, drBad = 9, dynQ = 1;
   function dynamicRes(dt) {
     if (!ctx.settings.get('dynamicRes') || ctx.state === 'loading' || document.hidden) return; if (dt > 0.25) return;
     drAcc += dt; drN++; drHold -= dt; if (drAcc < 1 || drHold > 0) { if (drAcc >= 1) { stats.fps = drN / drAcc; drAcc = drN = 0; } return; }
     const ms = drAcc / drN * 1000; stats.fps = 1000 / ms; drAcc = drN = 0; let nd = dyn; const gms = stats.gpuMs || 0;
-    if (ms > 18.6 && (!gms || gms > 13)) { drBad = dyn; nd = Math.max(0.55, dyn - (ms > 26 ? 0.12 : 0.06)); } else if (ms < 17.4 && dyn < 1 && (dyn + 0.06 < drBad - 0.001 || gms && gms < 9)) nd = Math.min(1, dyn + 0.06);
+    // shed volumetric step count first (invisible thanks to the temporal resolve), resolution only as a last resort
+    const slow = ms > 18.6 && (!gms || gms > 13), fast = ms < 17.4;
+    if (slow && dynQ > 0.62) { dynQ = Math.max(0.6, dynQ - (ms > 26 ? 0.2 : 0.1)); drHold = 1.5; applySteps(); return; }
+    if (slow) { drBad = dyn; nd = Math.max(0.7, dyn - (ms > 26 ? 0.1 : 0.05)); } else if (fast && dyn < 1 && (dyn + 0.05 < drBad - 0.001 || gms && gms < 9)) nd = Math.min(1, dyn + 0.05);
+    else if (fast && dyn >= 1 && dynQ < 1 && (!gms || gms < 11)) { dynQ = Math.min(1, dynQ + 0.1); drHold = 4; applySteps(); return; }
     drBad = Math.min(9, drBad + 0.002);
-    if (Math.abs(nd - dyn) > 0.01) { drHold = nd < dyn ? 2.5 : 6; dyn = nd; setSizes(); }
+    if (Math.abs(nd - dyn) > 0.01) { drHold = nd < dyn ? 2.5 : 6; dyn = nd; setSizes(true); }
+  }
+  function applySteps() {
+    const s = q.volSteps * (q.id === 'ultra' ? 1.45 : 1.3);
+    vol.u.uSteps.value = Math.round(s * (0.5 + 0.5 * dynQ)); vol.u.uLSteps.value = Math.max(3, q.lightSteps - (dynQ < 0.8 ? 1 : 0));
+    vol.u.uQual.value = clamp(105 / q.volSteps, 0.7, 1.9) / dynQ;
   }
 
   let groundY = 0, dark = 0, cu = 0.45, green = 0; const wx = {};
@@ -148,7 +160,7 @@ export async function create(ctx) {
     envT -= dt; if (bigReset || frame === 2 || envT <= 0) { envT = q.id === 'low' ? 5 : 2.2; if (frame > 1) { volUniforms(now, cam); updateEnv(); } }
     // ---- camera ----
     savedP.copy(cam.projectionMatrix); savedPI.copy(cam.projectionMatrixInverse);
-    _m.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); curVP.copy(_m);
+    _m.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse); curVP.copy(_m); curVPu.value.copy(_m); invVPu.copy(_m).invert();
     const j = q.taa ? JIT[frame % 16] : [0, 0];
     cam.projectionMatrix.elements[8] += j[0] * 2 / RW; cam.projectionMatrix.elements[9] += j[1] * 2 / RH; cam.projectionMatrixInverse.copy(cam.projectionMatrix).invert();
     invVP.value.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse).invert();
@@ -189,7 +201,7 @@ export async function create(ctx) {
   }
   function volUniforms(now, cam) {
     const u = vol.u; u.uCam.value.copy(cam.position); u.uFwd.value.copy(fwd.value); u.uSunDir.value.copy(atm.lightDir); u.uSunE.value.copy(atm.lightE); u.uSunEHigh.value.copy(atm.lightEHigh); u.uGroundRad.value.copy(groundRad.value);
-    u.uInvVP.value.copy(invVP.value); u.uTime.value = now; u.uFrame.value = frame % 1024; u.uGround.value = groundY; u.uTop.value = Math.max(SU.top, groundY + 3600); u.uPix.value = 2 * Math.tan(cam.fov * Math.PI / 360) / Math.max(vol.h, 1); u.uDrift.value.set(now * 7, now * -2.2);
+    u.uInvVP.value.copy(invVPu); u.uTime.value = now; u.uFrame.value = frame % 1024; u.uGround.value = groundY; u.uTop.value = Math.max(SU.top, groundY + 3600); u.uPix.value = 2 * Math.tan(cam.fov * Math.PI / 360) / Math.max(Math.sqrt(vol.h * vol.lh), 1); u.uDrift.value.set(now * 7, now * -2.2);
   }
 
   const gfx = {

@@ -12,7 +12,7 @@ const TOGGLE = { map: 'map', radar: 'radar', missions: 'missions', garage: 'gara
 
 export async function create(ctx) {
   const host = document.getElementById('ui') || document.body.appendChild(h('div', { id: 'ui' })); host.classList.add('shui');
-  const screens = {}, stack = []; let cur = null, curName = null, lockIntent = 0, pausedByUs = false, lastPause = -1e9, mapCv = null, mapT = 0, lapT = 0, padPrev = {}, padRep = 0, clickFx = null, netHooked = false, waitingStart = false, blurT = 0;
+  const screens = {}, stack = []; let cur = null, curName = null, lockIntent = 0, pausedByUs = false, lockPauseT = -1e9, escT = -1e9, capT = 0, mapCv = null, mapT = 0, lapT = 0, padPrev = {}, padRep = 0, clickFx = null, netHooked = false, waitingStart = false, blurT = 0;
   const radarCanvas = document.createElement('canvas'); radarCanvas.width = 512; radarCanvas.height = 384;
   const dirV = { x: 0, y: 0, z: 0 };
   const ui = {
@@ -27,7 +27,7 @@ export async function create(ctx) {
       if (!MAKE[name]) return; let s = screens[name]; if (!s) { try { s = screens[name] = MAKE[name](ui); } catch (e) { console.error('[ui ' + name + ']', e); return; } s.el.hidden = true; s.el.dataset.name = name; layer.append(s.el); }
       if (curName === name && !o.force) { s.open?.(o); return; }
       const from = curName; if (cur) { cur.close?.(); hide(cur); } if (s.root || o.replace) stack.length = 0; else if (from && from !== name && !o.noStack) { const i = stack.indexOf(name); if (i >= 0) stack.splice(i); else stack.push(from); }
-      cur = s; curName = name; ui.screen = name; s.el.hidden = false; s.el.classList.remove('in'); void s.el.offsetWidth; s.el.classList.add('in'); if (s.pause) lastPause = performance.now();
+      cur = s; curName = name; ui.screen = name; s.el.hidden = false; s.el.classList.remove('in'); void s.el.offsetWidth; s.el.classList.add('in');
       if (s.pause && ctx.state === 'playing' && (ctx.net?.role ?? 'solo') === 'solo') { ctx.state = 'paused'; pausedByUs = true; }
       ui.block(); try { s.open?.(o); s.update?.(0.016); } catch (e) { console.error('[ui ' + name + ']', e?.stack || e); } ctx.events.emit('ui:screen', { name, open: true }); if (s.focus && (ctx.input.usingPad || lastInput === 'key')) setTimeout(() => cur === s && s.el.querySelector(s.focus)?.focus({ preventScroll: true }), 30);
     },
@@ -36,7 +36,9 @@ export async function create(ctx) {
     },
     forceClose() { const name = curName; if (cur) { cur.close?.(); hide(cur); } cur = null; curName = null; ui.screen = null; stack.length = 0; if (pausedByUs) { pausedByUs = false; if (ctx.state === 'paused') ctx.state = 'playing'; } const a = document.activeElement; if (a && a !== document.body && host.contains(a)) a.blur(); ui.block(); if (name) ctx.events.emit('ui:screen', { name, open: false }); },
     block() { const b = !!cur || hud.chatOpen || ctx.state === 'menu'; ctx.input.uiBlock = b; host.classList.toggle('blocking', !!cur); if (b && document.pointerLockElement) { lockIntent = performance.now(); ctx.input.releaseCapture?.(); } },
-    capture() { if (ctx.state === 'playing' && !cur && !hud.chatOpen) { ctx.input.uiBlock = false; ctx.input.requestCapture?.(); } },
+    // Esc's own default action leaves pointer lock after our handler ran, so a lock requested from the Esc key event would be
+    // dropped again at once (and read as "player left the game" -> pause). Ask a moment later instead.
+    capture() { if (performance.now() - escT < 60) { clearTimeout(capT); capT = setTimeout(() => ui.capture(), 160); return; } if (ctx.state === 'playing' && !cur && !hud.chatOpen) { ctx.input.uiBlock = false; ctx.input.requestCapture?.(); } },
     start(o) { ctx.events.emit('game:start', o); },
     quit() { pausedByUs = false; ui.forceClose(); ctx.events.emit('game:quit', {}); },
     async hostLobby(name, city) { await ctx.net.host(name); ui.openScreen('lobby', { city, replace: true }); },
@@ -45,25 +47,38 @@ export async function create(ctx) {
   };
   ui.radar = new RadarEngine(ctx); ui.overlay = new Overlay(ctx); ui.radar.site = () => ui.pos();
   ctx.ui ||= ui; // available to HUD helpers during construction
-  const layer = h('div.screens'), hud = createHud(ui), cards = createCards(ui); ui.hud = hud; ui.cards = cards; host.append(hud.el, cards.el, layer);
+  const layer = h('div.screens'), hud = createHud(ui), cards = createCards(ui); ui.hud = hud; ui.cards = cards;
+  // Browsers refuse to re-lock the pointer from an Esc key press, so after resuming with Esc say how to get the mouse back.
+  const resume = h('div.resume', { html: '<span>Click to look around</span>' }); resume.hidden = true; host.append(hud.el, cards.el, resume, layer);
   const hide = (s) => { s.el.hidden = true; s.el.classList.remove('in'); };
 
   // ---------- input modality ----------
   let lastInput = 'mouse'; addEventListener('pointermove', (e) => { if (Math.abs(e.movementX) + Math.abs(e.movementY) > 2) { if (lastInput !== 'mouse') { lastInput = 'mouse'; host.classList.remove('keynav'); } } }, true);
+  // Esc is handled here, once, in the key event itself (input.js also turns it into a 'pause' press, which is consumed so
+  // the frame loop does not act on the same key a second time). It works with a text field or slider focused.
   addEventListener('keydown', (e) => {
-    if (!cur) return; const a = document.activeElement, typing = a && a.tagName === 'INPUT' && a.type !== 'range'; if (e.code === 'Escape' && typing) { a.blur(); return; }
-    if (cur.key?.(e)) return; const d = { ArrowUp: 'u', ArrowDown: 'd', ArrowLeft: 'l', ArrowRight: 'r' }[e.code]; if (!d || (typing && (d === 'l' || d === 'r')) || (a?.type === 'range' && (d === 'l' || d === 'r'))) return; e.preventDefault(); lastInput = 'key'; host.classList.add('keynav'); nav(d);
+    if (e.code === 'Escape') { escape(e); return; }
+    if (!cur) return; const a = document.activeElement, typing = a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.type !== 'range';
+    if (!typing && cur.key?.(e)) return; const d = { ArrowUp: 'u', ArrowDown: 'd', ArrowLeft: 'l', ArrowRight: 'r' }[e.code]; if (!d || (typing && (d === 'l' || d === 'r')) || (a?.type === 'range' && (d === 'l' || d === 'r'))) return; e.preventDefault(); lastInput = 'key'; host.classList.add('keynav'); nav(d);
   });
+  function escape(e) {
+    ctx.input.consume?.('pause'); if (e.repeat || !ctx.ready) return; e.preventDefault(); escT = performance.now();
+    if (hud.chatOpen) { hud.closeChat(); return; }
+    const a = document.activeElement; if (a && a !== document.body && host.contains(a)) a.blur();
+    if (cur) { if (cur.sticky || cur.root) return; if (curName === 'pause' && performance.now() - lockPauseT < 350) return; ui.closeScreen(); return; } // pause was just opened by the same Esc leaving pointer lock
+    if (ctx.state === 'playing') ui.openScreen('pause');
+  }
   function nav(d) {
     const L = [...cur.el.querySelectorAll('button:not([disabled]),input,[tabindex="0"]')].filter((e) => e.offsetParent !== null && !e.hidden); if (!L.length) return; const a = document.activeElement; if (!L.includes(a)) { (cur.el.querySelector(cur.focus || 'button') || L[0]).focus(); return; }
     const r = a.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2; let b = null, bs = 1e9; for (const e of L) { if (e === a) continue; const q = e.getBoundingClientRect(), dx = q.left + q.width / 2 - cx, dy = q.top + q.height / 2 - cy, f = d === 'u' ? -dy : d === 'd' ? dy : d === 'l' ? -dx : dx, o = d === 'u' || d === 'd' ? Math.max(0, Math.abs(dx) - (q.width + r.width) / 2) : Math.abs(dy); if (f < 3) continue; const s = f + o * 2.4; if (s < bs) { bs = s; b = e; } } if (b) { b.focus({ preventScroll: true }); b.scrollIntoView({ block: 'nearest' }); ui.beep('tick'); }
   }
   function padNav(dt) {
-    const p = ctx.input.pad; if (!p || !cur) { padPrev = {}; return; } const B = (i) => !!p.buttons[i]?.pressed, ax = p.axes; const D = { u: B(12) || ax[1] < -0.6, d: B(13) || ax[1] > 0.6, l: B(14) || ax[0] < -0.6, r: B(15) || ax[0] > 0.6 }; padRep -= dt; for (const k in D) { if (D[k] && (!padPrev[k] || padRep <= 0)) { host.classList.add('keynav'); lastInput = 'key'; nav(k); padRep = padPrev[k] ? 0.12 : 0.36; } padPrev[k] = D[k]; } const a = B(0), b = B(1); if (a && !padPrev.a) { const e = document.activeElement; if (e && cur.el.contains(e)) e.click(); else nav('d'); } if (b && !padPrev.b && !cur.root) ui.closeScreen(); padPrev.a = a; padPrev.b = b;
+    // only once the pad is actually in use: an idle controller or wheel resting off-centre must not drive the menus
+    const p = ctx.input.usingPad ? ctx.input.pad : null; if (!p || !cur) { padPrev = p ? { a: !!p.buttons[0]?.pressed, b: !!p.buttons[1]?.pressed } : {}; return; } const B = (i) => !!p.buttons[i]?.pressed, ax = p.axes; const D = { u: B(12) || ax[1] < -0.6, d: B(13) || ax[1] > 0.6, l: B(14) || ax[0] < -0.6, r: B(15) || ax[0] > 0.6 }; padRep -= dt; for (const k in D) { if (D[k] && (!padPrev[k] || padRep <= 0)) { host.classList.add('keynav'); lastInput = 'key'; nav(k); padRep = padPrev[k] ? 0.12 : 0.36; } padPrev[k] = D[k]; } const a = B(0), b = B(1); if (a && !padPrev.a) { const e = document.activeElement; if (e && cur.el.contains(e)) e.click(); else nav('d'); } if (b && !padPrev.b && !cur.root && !cur.sticky) { const x = document.activeElement; if (x && x !== document.body && host.contains(x)) x.blur(); ui.closeScreen(); } padPrev.a = a; padPrev.b = b;
   }
   // ---------- pointer lock / focus ----------
   document.addEventListener('pointerlockchange', () => {
-    if (document.pointerLockElement) return; const t = performance.now(); if (t - lockIntent < 400) return; if (ctx.state === 'playing' && !cur && !hud.chatOpen && ctx.player?.mode !== 'swept') ui.openScreen('pause');
+    if (document.pointerLockElement) return; const t = performance.now(); if (t - lockIntent < 400) return; if (ctx.state === 'playing' && !cur && !hud.chatOpen && ctx.player?.mode !== 'swept') { ui.openScreen('pause'); lockPauseT = performance.now(); }
   });
   addEventListener('blur', () => { blurT = performance.now(); if (ctx.state === 'playing' && !cur && !hud.chatOpen && (ctx.net?.role ?? 'solo') === 'solo' && document.visibilityState === 'hidden') ui.openScreen('pause'); });
   document.addEventListener('visibilitychange', () => { if (document.hidden && ctx.state === 'playing' && !cur && !hud.chatOpen && (ctx.net?.role ?? 'solo') === 'solo' && ctx.ready) ui.openScreen('pause'); });
@@ -88,11 +103,12 @@ export async function create(ctx) {
     hookNet(); const I = ctx.input, st = ctx.state, now = performance.now();
     if (st === 'playing' || st === 'paused') {
       for (const a in TOGGLE) if (I.pressed(a) && !hud.chatOpen) { const n = TOGGLE[a]; if (cur?.sticky) break; if (curName === n) { ui.forceClose(); ui.capture(); } else if (curName !== 'pause' && curName !== 'settings') { if (cur) stack.length = 0; ui.openScreen(n, { noStack: true }); } I.consume?.(a); break; }
-      if (I.pressed('pause')) { I.consume?.('pause'); if (hud.chatOpen) hud.closeChat(); else if (cur && now - lastPause > 300) ui.closeScreen(); else if (!cur) ui.openScreen('pause'); }
+      if (I.pressed('pause')) { I.consume?.('pause'); if (hud.chatOpen) hud.closeChat(); else if (cur) { if (!cur.sticky && !cur.root && now - lockPauseT > 350) ui.closeScreen(); } else ui.openScreen('pause'); }
     } else if (st === 'menu' && I.pressed('pause') && cur && !cur.root) { I.consume?.('pause'); ui.closeScreen(); }
     if (cur) { try { cur.update?.(dt); } catch (e) { if (!cur.err) { cur.err = 1; console.error('[ui ' + curName + ']', e?.stack || e); } } padNav(dt); }
     const R = ui.radar, act = st !== 'menu' && st !== 'loading'; if (act || curName === 'radar') { R.rate = gearValue(ctx.gameplay?.profile?.upgrades ? ctx.gameplay.profile : { upgrades: { gear: {} } }, 'radar', 'rate') || 60; if (curName !== 'radar' && R.range > 20000) R.setRange(20000); R.update(dt); }
     ui.overlay.tick(dt); hud.update(dt); cards.update(dt);
+    const rs = st === 'playing' && ui.ready && !cur && !hud.chatOpen && !document.pointerLockElement && !I.usingPad && !I.mouse.left && !I.mouse.right && ctx.player?.mode !== 'swept' && !ui.hideHud; if (resume.hidden === rs) resume.hidden = !rs;
     if (act) { lapT -= dt; if (lapT <= 0) { lapT = 0.16; if (ctx.player?.mode === 'drive') { drawLaptop(ui, radarCanvas, ctx.time.real); radarCanvas.version = (radarCanvas.version || 0) + 1; } } }
   }
   Object.assign(ui, { update, lateUpdate(dt) { ctx.gameplay?.syncViewModel?.(dt); }, screens });

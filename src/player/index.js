@@ -132,11 +132,13 @@ export async function create(ctx) {
         // spring arm following the velocity heading, damped; rolls slightly with the body
         const fwd = V.set(0, 0, -1).applyQuaternion(b.rq); const vh = sp > 3 && b.vLong > -1 ? Math.atan2(b.v.x, -b.v.z) : Math.atan2(fwd.x, -fwd.z), bh = Math.atan2(fwd.x, -fwd.z), hh = sp > 3 ? lerp(bh, bh + wrapAngle(vh - bh) * 0.5, 1) : bh;
         if (!C.init) chaseYaw = hh; chaseYaw += wrapAngle(hh - chaseYaw) * (1 - Math.exp(-dt * (b.airborne ? 1.2 : 4.2)));
-        const yaw = chaseYaw + P.look.yaw + lb, dist = Math.max(4.6, s.L * 0.95 + 1.6) + clamp(sp / 40) * 1.2, h = (s.tall || s.H) * 0.62 + 1.15, pitch = 0.12 + P.look.pitch * -1;
+        // chaseYaw is a compass heading (clockwise = right) while P.look.yaw is an Euler yaw (positive = left, as used by
+        // the cockpit/hood view), so it is subtracted here: mouse/stick right swings the view right in every camera.
+        const yaw = chaseYaw - P.look.yaw + lb, dist = Math.max(4.6, s.L * 0.95 + 1.6) + clamp(sp / 40) * 1.2, h = (s.tall || s.H) * 0.62 + 1.15, pitch = 0.12 + P.look.pitch * -1;
         tgt.copy(b.rp).add(V2.set(0, (s.tall || s.H) * 0.55 - s.cgY + 0.35, 0)); chaseVel.lerp(b.v, 1 - Math.exp(-dt * 6));
         want.set(Math.sin(yaw) * Math.cos(pitch) * -dist, h - 0.8 + Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist).add(tgt).addScaledVector(chaseVel, -0.035);
         const gy = ctx.world.heightAt(want.x, want.z) + 0.45; if (want.y < gy) want.y = gy; // terrain collision
-        if (ctx.world.raycastTerrain) { V3.copy(want).sub(tgt); const L = V3.length(); V3.normalize(); const hit = ctx.world.raycastTerrain(tgt, V3, L); if (hit > 0 && hit < L) want.copy(tgt).addScaledVector(V3, Math.max(1.5, hit - 0.4)); }
+        if (ctx.world.raycastTerrain) { V3.copy(want).sub(tgt); const L = V3.length(); V3.normalize(); const hit = ctx.world.raycastTerrain(tgt, V3, L); if (hit > 0 && hit < L) { want.copy(tgt).addScaledVector(V3, Math.max(s.L * 0.55 + 1.3, hit - 0.4)); const gy2 = ctx.world.heightAt(want.x, want.z) + 0.45; if (want.y < gy2) want.y = gy2; } } // never pull the arm inside the car body
         if (!C.init) C.pos.copy(want); C.pos.lerp(want, 1 - Math.exp(-dt * 12)); M4.lookAt(C.pos, tgt, UP); wq.setFromRotationMatrix(M4);
         const roll = clamp(-b.accLocal.x * 0.004, -0.06, 0.06) + clamp(b.windLoad * 0.03, 0, 0.05) * Math.sin(ctx.time.now * 6); wq.multiply(Q2.setFromAxisAngle(V2.set(0, 0, 1), roll));
         fovAdd = clamp((sp - 8) / 45) * 11;

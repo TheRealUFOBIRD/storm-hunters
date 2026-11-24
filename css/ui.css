@@ -33,6 +33,7 @@ html { font-size: clamp(12.5px, min(1vw, 1.778vh), 40px); }
 .shui .hud.dim > :not(.notes) { opacity: 0; }
 .shui .hud.vfon .tl, .shui .hud.vfon .bl, .shui .hud.vfon .compass, .shui .hud.vfon .tools, .shui .hud.vfon .cash, .shui .hud.vfon .live { opacity: 0; transition: opacity .2s; }
 .shui .hud.swepton > :not(.hurt):not(.flash) { opacity: 0; }
+.shui .resume { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); pointer-events: none; padding: .35rem .9rem; background: rgba(12,11,7,.72); border-left: 3px solid var(--amber); font-size: .9rem; letter-spacing: .06em; text-transform: uppercase; text-shadow: var(--halo); animation: scrin .4s ease-out; }
 .shui .compass { position: absolute; top: 1rem; left: 50%; width: 46rem; height: 3.6rem; margin-left: -23rem; }
 .shui .compass canvas, .shui canvas { display: block; width: 100%; height: 100%; }
 .shui .threat { position: absolute; top: 4.8rem; left: 50%; transform: translateX(-50%); display: grid; grid-template-columns: auto auto auto auto; grid-template-rows: auto auto; column-gap: .9rem; align-items: baseline; padding: .4rem 1rem .5rem; background: linear-gradient(90deg, transparent, rgba(12,11,7,.72) 12%, rgba(12,11,7,.72) 88%, transparent); white-space: nowrap; --c: var(--amber); }

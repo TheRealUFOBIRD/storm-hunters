@@ -6,15 +6,26 @@ export const CELL = 200, GX = 512, GZ = 328, OX = -51200, OZ = -32800;          
 export const RC = 128, RGX = 800, RGZ = 512, ROX = -51200, ROZ = -32768;        // road / river index
 export const SEC = 800, SX0 = -63, SZ0 = -40, SNX = 126, SNZ = 80;              // farm sections
 export const FAR_E = 48;
+// road ribbon cross-sections (interstate, highway, street): lateral offsets u and height offsets on top of the crowned
+// grade line y - CROWN*min(|u|,hw). Shared by roadmesh.js (mesh) and the grading below (terrain must stay under it).
+export const CROWN = .018;
+export const XS = [[-11.3, -10.2, -5, 0, 5, 10.2, 11.3], [-6.3, -5.2, -2.6, 0, 2.6, 5.2, 6.3], [-7.6, -7.45, -5.1, -5, 0, 5, 5.1, 7.45, 7.6]];
+export const YS = [[-.32, .015, .03, .04, .03, .015, -.32], [-.32, .015, .03, .04, .03, .015, -.32], [-.4, .15, .15, .0, .03, .0, .15, .15, -.4]];
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const sst = (a, b, v) => { let t = (v - a) / (b - a); t = t < 0 ? 0 : t > 1 ? 1 : t; return t * t * (3 - 2 * t); };
 const cub = (a, b, c, d, t) => b + .5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
-const EDGE = [12.7, 7.2, 6.5, 4.6], HWK = [10.2, 5.2, 5, 3.6], PRI = [64, 16, 1, 4], INFK = [100, 90, 34, 34];
+// EDGE: flat graded footprint (axis distance) per class; HWK: paved half width; PRI: blend priority outside footprints;
+// FP: dominance inside a footprint (a higher class footprint always owns a junction); SURF: half width of the drawn top
+// surface (street incl. sidewalk); SKIRT: where the ribbon skirt reaches the ground; SINK: terrainAt drop under ribbons
+export const EDGE = [12.7, 7.2, 7.8, 4.6], HWK = [10.2, 5.2, 5, 3.6], INFK = [100, 90, 34, 34];
+const PRI = [64, 16, 1, 4], FP = [1e8, 1e6, 1e2, 1e4], SURF = [10.2, 5.2, 7.45, 0], SKIRT = [11.3, 6.3, 7.6, 0], SINK = .16;
+// cubic Hermite road profile on a segment: y0,y1 heights, m0,m1 tangents (height per unit t)
+export const herm = (y0, y1, m0, m1, t) => { const t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * m0 + (3 * t2 - 2 * t3) * y1 + (t3 - t2) * m1; };
 export const CROPS = ['natural', 'pasture', 'wheat', 'goldwheat', 'corn', 'soy', 'plowed', 'hay', 'cotton', 'stubble'];
 
 export function makeSampler(data) {
   const M = data.mac, seg = data.seg, segIdx = data.segIdx, riv = data.rivSeg, rivIdx = data.rivIdx, hasRoads = !!(data.roads && seg);
-  const S = seg?.S, SB = seg?.B, SR = seg?.R, KR = hasRoads ? Uint8Array.from(data.roads, (r) => r.k) : null;
+  const S = seg?.S, SB = seg?.B, SR = seg?.R, SM = seg?.M, KR = hasRoads ? Uint8Array.from(data.roads, (r) => r.k) : null;
   // outputs of last height call: signed distances to road edges (by class) and river bank
   const O = { eMaj: 99, eGrv: 99, eStr: 99, eRiv: 999, rivY: -Infinity, rough: 0, mesa: 0, deck: false };
   const P = { h: 0, rough: 0, mesa: 0, roll: 0 };
@@ -69,28 +80,47 @@ export function makeSampler(data) {
     O.eMaj = O.eGrv = O.eStr = 99; O.deck = false; if (!hasRoads) return h;
     const ci = Math.floor((x - ROX) / RC), cj = Math.floor((z - ROZ) / RC); if (ci < 0 || cj < 0 || ci >= RGX || cj >= RGZ) return h;
     const c = cj * RGX + ci, off = segIdx.off, e1 = off[c + 1]; let q = off[c]; if (q === e1) return h; const ref = segIdx.ref;
-    let ws = 0, ys = 0, wm = 0, em = 99, dk = -1e9;
-    for (; q < e1; q++) {
-      const s = ref[q], a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az, px = x - ax, pz = z - az; let t = (px * dx + pz * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t;
-      const ex = px - dx * t, ez = pz - dz * t, d2 = ex * ex + ez * ez, k = KR[SR[s]], inf = INFK[k]; if (d2 > inf * inf) continue;
-      const d = Math.sqrt(d2), hw = HWK[k], ry = S[a + 4] + (S[a + 5] - S[a + 4]) * t - (d < hw ? d : hw) * .018;
-      if (SB[s]) { if (d < hw + .8) { if (deck && ry > dk) dk = ry; if (k < 2 && d - hw < O.eMaj) O.eMaj = d - hw; } continue; }
-      const e = d - EDGE[k];
-      if (k < 2) { if (d - hw < O.eMaj) O.eMaj = d - hw; } else if (k === 3) { if (d - hw < O.eGrv) O.eGrv = d - hw; } else if (d - hw < O.eStr) O.eStr = d - hw;
-      let w; if (e <= 0) w = 1; else { const df = ry > h ? ry - h : h - ry, mx = inf - EDGE[k], bw = k > 1 ? Math.min(mx, 9 + df * 1.6) : Math.min(mx, 16 + 2.4 * df); if (e >= bw) continue; const f = e / bw; w = 1 - f * f * (3 - 2 * f); }
-      if (k !== 2 && e < em) em = e; else if (k === 2 && e < 0) em = -1;
-      const w2 = w * w, w4 = w2 * w2 * PRI[k]; ws += w4; ys += w4 * ry; if (w > wm) wm = w;
+    // Only the nearest segment of each road counts (segments of one road are contiguous in the cell list): blending a
+    // road's other segments in used their clamped end heights and biased the surface on vertical curves (bumps).
+    let ws = 0, ys = 0, wm = 0, em = 99, dk = -1e9, sk = 0, cr = -1, bd = 1e18, bs = -1, bt = 0, nd = 1e18, ns = -1, nt = 0;
+    for (; ; q++) {
+      const s = q < e1 ? ref[q] : -1, r = s < 0 ? -2 : SR[s];
+      if (r !== cr) {
+        if (cr >= 0) {
+          const k = KR[cr], inf = INFK[k], hw = HWK[k]; let dry = 1e9;
+          if (SB[bs] && bd < (hw + .8) * (hw + .8)) { // bridge deck
+            const d = Math.sqrt(bd), a = bs * 6, ry = (SM ? herm(S[a + 4], S[a + 5], SM[bs * 2], SM[bs * 2 + 1], bt) : S[a + 4] + (S[a + 5] - S[a + 4]) * bt) - (d < hw ? d : hw) * CROWN;
+            dry = ry - 1.7; if (deck && ry > dk) dk = ry; if (k < 2 && d - hw < O.eMaj) O.eMaj = d - hw;
+          }
+          if (ns >= 0 && nd < inf * inf) {
+            const d = Math.sqrt(nd), a = ns * 6; let ry = (SM ? herm(S[a + 4], S[a + 5], SM[ns * 2], SM[ns * 2 + 1], nt) : S[a + 4] + (S[a + 5] - S[a + 4]) * nt) - (d < hw ? d : hw) * CROWN, e = d - EDGE[k], u = d - hw; if (ry > dry) ry = dry; // abutment: never grade above the deck
+            if (k < 2) { if (u < O.eMaj) O.eMaj = u; } else if (k === 3) { if (u < O.eGrv) O.eGrv = u; } else if (u < O.eStr) O.eStr = u;
+            let w = 1; if (e > 0) { const df = ry > h ? ry - h : h - ry, mx = inf - EDGE[k], bw = k > 1 ? Math.min(mx, 9 + df * 1.6) : Math.min(mx, 16 + 2.4 * df); if (e >= bw) w = 0; else { const f = e / bw; w = 1 - f * f * (3 - 2 * f); } }
+            if (w > 0) {
+              if (k !== 2 && e < em) em = e; else if (k === 2 && e < 0) em = -1;
+              const w2 = w * w, w4 = w2 * w2 * PRI[k] + (e < 1.5 ? FP[k] * (e <= 0 ? 1 : 1 - sst(0, 1.5, e)) : 0); ws += w4; ys += w4 * ry; if (w > wm) wm = w;
+              if (k < 3) { const v = d - SURF[k], g = v <= 0 ? 1 : 1 - sst(0, (SKIRT[k] - SURF[k]) * .6, v); if (g > sk) sk = g; } // under a drawn ribbon
+            }
+          }
+        }
+        if (s < 0) break; cr = r; bd = nd = 1e18; bs = ns = -1;
+      }
+      const a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az, px = x - ax, pz = z - az; let t = (px * dx + pz * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const ex = px - dx * t, ez = pz - dz * t, d2 = ex * ex + ez * ez;
+      if (d2 < bd) { bd = d2; bs = s; bt = t; } if (!SB[s] && d2 < nd) { nd = d2; ns = s; nt = t; }
     }
     if (ws > 0) { h += (ys / ws - h) * wm; if (em > 0 && em < 8) { const f = em / 8; h -= .95 * 6.75 * f * (1 - f) * (1 - f); } }
     if (dk > -1e8 && dk > h - .5) { O.deck = true; return dk; }
-    return h;
+    // terrainAt (render/placement ground) sits SINK below the ribbon so coarse terrain LODs never poke through it;
+    // heightAt (physics) stays exactly on the road surface
+    return deck ? h : h - sk * SINK;
   }
   const heightAt = (x, z) => grade(x, z, groundAt(x, z), true);
   const terrainAt = (x, z) => grade(x, z, groundAt(x, z), false);
   function waterLevelAt(x, z) {
     let u = Math.round((x - OX) / CELL), v = Math.round((z - OZ) / CELL); u = clamp(u, 0, GX - 1); v = clamp(v, 0, GZ - 1); const k = v * GX + u; let w = -Infinity;
     if (data.coast[k] < 450) { if (groundAt(x, z) < .15 && coastAt(x, z) < 260) return 0; }
-    if (data.lakeI && data.lakeI[k] !== 255) { const L = data.lakes[data.lakeI[k]]; if (groundAt(x, z) < L.level + .1) return L.level; }
+    if (data.lakeI && data.lakeI[k] !== 255) { const L = data.lakes[data.lakeI[k]]; if (groundAt(x, z) < L.level + .1 && macro(x, z) < L.level + .6) return L.level; } // macro test: river valleys cut below a nearby lake's level are not lake
     if (riv) { groundAt(x, z); if (O.eRiv < 7) w = O.rivY; }
     return w;
   }
@@ -113,10 +143,11 @@ export function makeSampler(data) {
   // local forest coverage 0..1 incl. clumping
   function forestAt(x, z) { const f = bil4(data.bioA, 0, x, z); if (f < .01) return 0; const n = gnoise(x * .0047, z * .0047, 51) * .6 + gnoise(x * .0017, z * .0017, 52) * .55; return f > .8 ? clamp(.9 + n * .5, 0, 1) : sst(.16, .42, n * .5 + f * .72 - .02) * clamp(.35 + f, 0, 1); }
 
-  // signed distance to the edge of any road that has priority over road `id`
+  // signed distance to the edge of any road that has priority over road `id` (higher class, or same class and built
+  // earlier: at a street crossing the earlier street owns the intersection, the later one is clipped there)
   function otherEdge(x, z, id) {
     const ci = Math.floor((x - ROX) / RC), cj = Math.floor((z - ROZ) / RC); if (ci < 0 || cj < 0 || ci >= RGX || cj >= RGZ) return 99; const c = cj * RGX + ci, own = KR[id]; let m = 99;
-    for (let q = segIdx.off[c], e = segIdx.off[c + 1]; q < e; q++) { const s = segIdx.ref[q], r = SR[s]; if (r === id) continue; const k = KR[r]; if (k > own || (k === own && (k === 2 || r > id)) || k === 3) continue; const a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az; let t = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - ax - dx * t, ez = z - az - dz * t, d = Math.sqrt(ex * ex + ez * ez) - HWK[k]; if (d < m) m = d; }
+    for (let q = segIdx.off[c], e = segIdx.off[c + 1]; q < e; q++) { const s = segIdx.ref[q], r = SR[s]; if (r === id) continue; const k = KR[r]; if (k > own || (k === own && r > id) || k === 3) continue; const a = s * 6, ax = S[a], az = S[a + 1], dx = S[a + 2] - ax, dz = S[a + 3] - az; let t = ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz); t = t < 0 ? 0 : t > 1 ? 1 : t; const ex = x - ax - dx * t, ez = z - az - dz * t, d = Math.sqrt(ex * ex + ez * ez) - HWK[k]; if (d < m) m = d; }
     return m;
   }
   // ---- nearest road

@@ -4,7 +4,7 @@ import { toWorld, toLatLon, BOUNDS } from '../core/geo.js';
 import { gnoise, vnoise, fbm, ridged } from '../core/noise.js';
 import { hash2 } from '../core/rng.js';
 import * as G from './geodata.js';
-import { makeSampler, CELL, GX, GZ, OX, OZ, RC, RGX, RGZ, ROX, ROZ, SEC, SX0, SZ0, SNX, SNZ } from './sampler.js';
+import { makeSampler, herm, CROWN, CELL, GX, GZ, OX, OZ, RC, RGX, RGZ, ROX, ROZ, SEC, SX0, SZ0, SNX, SNZ } from './sampler.js';
 
 const clamp = (v, a = 0, b = 1) => (v < a ? a : v > b ? b : v), lerp = (a, b, t) => a + (b - a) * t;
 const sst = (a, b, v) => { const t = clamp((v - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -243,30 +243,63 @@ function csr(n, each) {
 }
 export const KINDS = ['interstate', 'highway', 'street', 'gravel'];
 const HW = { interstate: 10.2, highway: 5.2, street: 5, gravel: 3.6 }, SH = { interstate: 2.5, highway: 2, street: 2.5, gravel: 1.2 }, INF = { interstate: 100, highway: 90, street: 34, gravel: 34 };
-const SMOOTH = { interstate: 11, highway: 8, street: 2, gravel: 3 };
+const SMOOTH = { interstate: 11, highway: 8, street: 2, gravel: 3 }, GMAX = { interstate: .06, highway: .075, street: .1, gravel: .1 }, DEVMAX = { interstate: 6, highway: 5, street: 2, gravel: 2.5 };
 
 function buildRoads(data, defs, F) {
   const roads = [], cities = data.cities, sampG = makeSampler({ ...data, roads: null });
   // incremental index while building
   const inc = new Map(), tmp = { y: 0, w: 0, d: 0 };
   const addInc = (r) => { const p = r.pts, m = r.hw + r.sh + 20; for (let i = 0; i + 1 < p.length / 2; i++) { const ax = p[i * 2], az = p[i * 2 + 1], bx = p[i * 2 + 2], bz = p[i * 2 + 3]; for (let cj = Math.floor((Math.min(az, bz) - m) / RC); cj <= Math.floor((Math.max(az, bz) + m) / RC); cj++) for (let ci = Math.floor((Math.min(ax, bx) - m) / RC); ci <= Math.floor((Math.max(ax, bx) + m) / RC); ci++) { const key = cj * 4096 + ci; let a = inc.get(key); if (!a) inc.set(key, a = []); a.push(r, i); } } };
-  const nearInc = (x, z, o) => { // closest earlier road; o.y height, o.d dist to axis, o.w half width
+  const ryAt = (r, i, t) => { const L = r.s[i + 1] - r.s[i]; return herm(r.y[i], r.y[i + 1], r.m[i] * L, r.m[i + 1] * L, t); };
+  const nearInc = (x, z, o) => { // closest earlier road; o.y crowned surface height there, o.d dist to axis, o.w half width, o.br bridge there
     o.d = 1e9; o.r = null; const a = inc.get(Math.floor(z / RC) * 4096 + Math.floor(x / RC)); if (!a) return o;
-    for (let q = 0; q < a.length; q += 2) { const r = a[q], i = a[q + 1], p = r.pts, ax = p[i * 2], az = p[i * 2 + 1], dx = p[i * 2 + 2] - ax, dz = p[i * 2 + 3] - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)), ex = x - ax - dx * t, ez = z - az - dz * t, d = Math.sqrt(ex * ex + ez * ez); if (d - r.hw < o.d - o.w || !o.r) { o.d = d; o.w = r.hw; o.y = lerp(r.y[i], r.y[i + 1], t); o.r = r; const l = Math.sqrt(dx * dx + dz * dz); o.dx = dx / l; o.dz = dz / l; o.x = ax + dx * t; o.z = az + dz * t; } }
+    for (let q = 0; q < a.length; q += 2) { const r = a[q], i = a[q + 1], p = r.pts, ax = p[i * 2], az = p[i * 2 + 1], dx = p[i * 2 + 2] - ax, dz = p[i * 2 + 3] - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)), ex = x - ax - dx * t, ez = z - az - dz * t, d = Math.sqrt(ex * ex + ez * ez); if (d - r.hw < o.d - o.w || !o.r) { o.d = d; o.w = r.hw; o.y = ryAt(r, i, t) - CROWN * Math.min(d, r.hw); o.br = r.br[i] | r.br[i + 1]; o.r = r; const l = Math.sqrt(dx * dx + dz * dz); o.dx = dx / l; o.dz = dz / l; o.x = ax + dx * t; o.z = az + dz * t; } }
     return o;
   };
-  const finish = (r) => {
-    const p = r.pts, n = p.length / 2, y = new Float32Array(n), br = new Uint8Array(n), sm = SMOOTH[r.kind]; let g = new Float32Array(n); const pinY = new Float32Array(n), pin = new Uint8Array(n);
-    for (let i = 0; i < n; i++) { const x = p[i * 2], z = p[i * 2 + 1], gr = sampG.groundAt(x, z), wl = sampG.waterLevelAt(x, z); g[i] = gr; if (wl > gr - .4) { br[i] = 1; g[i] = wl + 5.5; } nearInc(x, z, tmp); if (tmp.r && tmp.d < tmp.w + r.hw + 2) { pin[i] = 1; pinY[i] = tmp.y; } }
-    // bridges: spread approach
-    for (let pass = 0; pass < 2; pass++) { const o = g.slice(); for (let i = 0; i < n; i++) { let s = 0, w = 0; for (let k = -sm; k <= sm; k++) { const q = clamp(i + k, 0, n - 1), ww = sm + 1 - Math.abs(k); s += o[q] * ww; w += ww; } g[i] = s / w; } }
-    if (br.some((b) => b)) for (let i = 0; i < n; i++) if (br[i]) { const wl = sampG.waterLevelAt(p[i * 2], p[i * 2 + 1]); if (g[i] < wl + 4) { const up = wl + 4 - g[i]; for (let k = -8; k <= 8; k++) { const q = i + k; if (q >= 0 && q < n) g[q] = Math.max(g[q], g[q] + 0, wl + 4 - Math.abs(k) * .9 < g[q] ? g[q] : wl + 4 - Math.abs(k) * .9); } } }
-    if (r.kind !== 'street') for (let pass = 0; pass < 2; pass++) for (let i = 1; i < n - 1; i++) g[i] = (g[i - 1] + g[i] * 2 + g[i + 1]) / 4;
-    y.set(g); const fall = r.kind === 'interstate' || r.kind === 'highway' ? 9 : 3;
-    for (let i = 0; i < n; i++) { let bk = 99; let bd = 0; for (let k = 0; k <= fall && bk === 99; k++) { if (i - k >= 0 && pin[i - k]) { bk = k; bd = pinY[i - k] - g[i - k]; } else if (i + k < n && pin[i + k]) { bk = k; bd = pinY[i + k] - g[i + k]; } } if (bk < 99) y[i] = g[i] + bd * (1 - sst(0, fall + 1, bk)); if (bk === 0) br[i] = 0; }
-    r.y = y; r.br = br; r.id = roads.length; let s = 0; r.s = new Float32Array(n); for (let i = 1; i < n; i++) { s += Math.hypot(p[i * 2] - p[i * 2 - 2], p[i * 2 + 1] - p[i * 2 - 1]); r.s[i] = s; } r.len = s; roads.push(r); addInc(r);
+  // highest-class earlier road whose surface meets a road of half width hw at (x,z)
+  const pinInc = (x, z, hw, o) => {
+    o.r = null; const a = inc.get(Math.floor(z / RC) * 4096 + Math.floor(x / RC)); if (!a) return o; let bk = 9, bd = 1e9;
+    for (let q = 0; q < a.length; q += 2) { const r = a[q], i = a[q + 1], p = r.pts, ax = p[i * 2], az = p[i * 2 + 1], dx = p[i * 2 + 2] - ax, dz = p[i * 2 + 3] - az, t = clamp(((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)), ex = x - ax - dx * t, ez = z - az - dz * t, d = Math.sqrt(ex * ex + ez * ez);
+      if (d >= r.hw + hw + 2 || r.k > bk || (r.k === bk && d >= bd)) continue; bk = r.k; bd = d; o.r = r; o.i = i; o.d = d; o.w = r.hw; o.y = ryAt(r, i, t) - CROWN * Math.min(d, r.hw); o.br = r.br[i] | r.br[i + 1]; o.x = ax + dx * t; o.z = az + dz * t; }
+    return o;
   };
-  const mk = (kind, name, pts) => ({ kind, name, pts, hw: HW[kind], sh: SH[kind], k: KINDS.indexOf(kind) });
+  // Vertical profile: smoothed ground -> bridge clearance -> grade limit -> junction pins (blended over a distance that keeps
+  // the extra grade small) -> constrained relaxation -> C1 Hermite tangents (sampler and mesh evaluate the same cubic).
+  const finish = (r) => {
+    const p = r.pts, n = p.length / 2, br = new Uint8Array(n), sm = SMOOTH[r.kind], G = GMAX[r.kind], g = new Float32Array(n), pinY = new Float32Array(n), pin = new Uint8Array(n), lo = new Float32Array(n).fill(-1e9), s = new Float32Array(n);
+    for (let i = 1; i < n; i++) s[i] = s[i - 1] + Math.hypot(p[i * 2] - p[i * 2 - 2], p[i * 2 + 1] - p[i * 2 - 1]);
+    const ds = n > 1 ? s[n - 1] / (n - 1) : 24;
+    for (let i = 0; i < n; i++) {
+      const x = p[i * 2], z = p[i * 2 + 1], gr = sampG.groundAt(x, z), wl = sampG.waterLevelAt(x, z); g[i] = gr;
+      if (wl > gr - .4 && wl < gr + 25) { br[i] = 1; g[i] = wl + 5.5; for (let q = i; q >= 0 && s[i] - s[q] < 260; q--) { const v = wl + 4 - (s[i] - s[q]) * G * .7; if (v > lo[q]) lo[q] = v; } for (let q = i; q < n && s[q] - s[i] < 260; q++) { const v = wl + 4 - (s[q] - s[i]) * G * .7; if (v > lo[q]) lo[q] = v; } }
+      pinInc(x, z, r.hw, tmp); if (tmp.r) {
+        const dy = tmp.y - gr, o = tmp.r;
+        if (tmp.br && !br[i] && dy > 5.5) continue; // passes under an existing bridge
+        if (dy > 7.5 && !br[i] && o.k <= r.k) { for (let j = Math.max(0, tmp.i - 2); j <= Math.min(o.pts.length / 2 - 1, tmp.i + 3); j++) if (Math.hypot(o.pts[j * 2] - tmp.x, o.pts[j * 2 + 1] - tmp.z) < r.hw + 30) o.br[j] = 1; continue; } // underpass: the embanked road gets a deck
+        if (dy < -7.5 && o.k >= r.k) { br[i] = 1; const v0 = tmp.y + 6.5; for (let q = 0; q < n; q++) { const v = v0 - Math.abs(s[q] - s[i]) * G * .8; if (v > lo[q]) lo[q] = v; } continue; } // overpass over a road in a cut
+        pin[i] = 1; pinY[i] = tmp.y;
+      }
+    }
+    const relax = (a, passes, fixed) => { for (let k = 0; k < passes; k++) for (let i = 1; i < n - 1; i++) { if (fixed && fixed[i]) continue; const v = (a[i - 1] + a[i] * 2 + a[i + 1]) / 4; a[i] = v > lo[i] ? v : lo[i]; } };
+    for (let pass = 0; pass < 2; pass++) { const o = g.slice(); for (let i = 0; i < n; i++) { let a = 0, w = 0; for (let k = -sm; k <= sm; k++) { const q = clamp(i + k, 0, n - 1), ww = sm + 1 - Math.abs(k); a += o[q] * ww; w += ww; } g[i] = a / w; } }
+    for (let i = 0; i < n; i++) if (g[i] < lo[i]) g[i] = lo[i];
+    relax(g, 2); const g0 = g.slice(), DEV = DEVMAX[r.kind];
+    for (let it = 0; it < 40; it++) { // grade limit: spread excess climb to both ends of a too-steep step, but stay within DEV of the smoothed ground
+      let ex = 0; for (let i = 0; i + 1 < n; i++) { const L = s[i + 1] - s[i], d = g[i + 1] - g[i], e = Math.abs(d) - G * L; if (e > 0) { const h = e * .5 * Math.sign(d); g[i] += h; g[i + 1] -= h; ex = Math.max(ex, e); } }
+      relax(g, 1); for (let i = 0; i < n; i++) { const v = Math.min(g0[i] + DEV, Math.max(g0[i] - DEV, g[i])); g[i] = v > lo[i] ? v : lo[i]; } if (ex < .02) break;
+    }
+    const y = g.slice(), pj = []; for (let i = 0; i < n; i++) if (pin[i]) pj.push(i);
+    if (pj.length) {
+      const num = new Float32Array(n), den = new Float32Array(n), wmx = new Float32Array(n);
+      for (const j of pj) { const b = pinY[j] - g[j], F = Math.min(48, Math.max(4, Math.ceil(1.6 * Math.abs(b) / (G * ds)))); for (let i = Math.max(0, j - F); i <= Math.min(n - 1, j + F); i++) { const w = 1 - sst(0, F + 1, Math.abs(i - j)), om = w / (1.0001 - w); num[i] += b * om; den[i] += om; if (w > wmx[i]) wmx[i] = w; } }
+      for (let i = 0; i < n; i++) if (den[i] > 0) y[i] = g[i] + num[i] / den[i] * wmx[i];
+      for (const j of pj) { y[j] = pinY[j]; br[j] = 0; }
+      relax(y, 3, pin);
+    }
+    const m = new Float32Array(n); for (let i = 0; i < n; i++) { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); m[i] = b > a ? (y[b] - y[a]) / (s[b] - s[a]) : 0; }
+    r.y = y; r.m = m; r.br = br; r.id = roads.length; r.s = s; r.len = s[n - 1]; roads.push(r); addInc(r);
+  };
+  const mk = (kind, name, pts, blk = 0) => ({ kind, name, pts, hw: HW[kind], sh: SH[kind], k: KINDS.indexOf(kind), blk });
   for (const d of defs) {
     let pts = d.pts; // snap ends onto existing roads
     const o = { w: 0 }; const snap = (x, z) => { nearInc(x, z, o); return o.r ? [o.x, o.z, o.d] : null; };
@@ -280,7 +313,7 @@ function buildRoads(data, defs, F) {
     const S = c.town ? 120 : 132, R = c.radius * .96, n = Math.floor(R / S); c.block = S;
     const run = (along) => {
       for (let i = -n; i <= n; i++) {
-        let cur = []; const flush = () => { if (cur.length >= 6) finish(mk('street', along ? `${Math.abs(i) + 1}${['th', 'st', 'nd', 'rd'][(Math.abs(i) + 1) % 10 < 4 && !((Math.abs(i) + 1) > 10 && (Math.abs(i) + 1) < 14) ? (Math.abs(i) + 1) % 10 : 0]} St` : i ? `${['Oak', 'Elm', 'Maple', 'Cedar', 'Walnut', 'Pecan', 'Locust', 'Cherry', 'Pine'][Math.abs(i) % 9]} ${i < 0 ? 'Ave' : 'Blvd'}` : 'Main St', new Float32Array(cur))); cur = []; };
+        let cur = []; const flush = () => { if (cur.length >= 6) finish(mk('street', along ? `${Math.abs(i) + 1}${['th', 'st', 'nd', 'rd'][(Math.abs(i) + 1) % 10 < 4 && !((Math.abs(i) + 1) > 10 && (Math.abs(i) + 1) < 14) ? (Math.abs(i) + 1) % 10 : 0]} St` : i ? `${['Oak', 'Elm', 'Maple', 'Cedar', 'Walnut', 'Pecan', 'Locust', 'Cherry', 'Pine'][Math.abs(i) % 9]} ${i < 0 ? 'Ave' : 'Blvd'}` : 'Main St', new Float32Array(cur), S)); cur = []; };
         for (let t = -n; t < n; t++) {
           let ok = true; const pa = [], u = i * S; for (let q = 0; q <= 4; q++) { const v = (t + q / 4) * S, x = c.x + (along ? v : u), z = c.z + (along ? u : v); if (Math.sqrt(u * u + v * v) > R + 10) ok = false; nearInc(x, z, o); if (o.r && o.r.k < 2 && o.d < o.w + 14 && Math.abs(along ? o.dx : o.dz) > .8) ok = false; const wl = sampG.waterLevelAt(x, z); if (wl > -1e8 && wl > sampG.groundAt(x, z) - .5) ok = false; pa.push(x, z); }
           if (!ok || (c.town && hash2(i + 50, t + 50, c.x & 1023) < .12)) { flush(); continue; } if (!cur.length) cur.push(pa[0], pa[1]); for (let q = 1; q <= 4; q++) cur.push(pa[q * 2], pa[q * 2 + 1]);
@@ -314,5 +347,6 @@ function buildRoads(data, defs, F) {
   for (const r of roads) for (let i = 0; i + 1 < r.pts.length / 2; i++, q++) { const p = r.pts, a = q * 6; S[a] = p[i * 2]; S[a + 1] = p[i * 2 + 1]; S[a + 2] = p[i * 2 + 2]; S[a + 3] = p[i * 2 + 3]; S[a + 4] = r.y[i]; S[a + 5] = r.y[i + 1]; R[q] = r.id; I[q] = i; B[q] = r.br[i] | r.br[i + 1]; }
   if (roads.length > 65535) throw new Error('too many roads');
   for (const r of roads) { r.seg0 = 0; } q = 0; for (const r of roads) { r.seg0 = q; q += r.pts.length / 2 - 1; }
-  data.roads = roads; data.nMajor = nMajor; data.seg = { S, R, I, B, n }; data.segIdx = csr(n, (k, f) => f(S[k * 6], S[k * 6 + 1], S[k * 6 + 2], S[k * 6 + 3], INF[roads[R[k]].kind]));
+  data.roads = roads; data.nMajor = nMajor; const M = new Float32Array(n * 2); q = 0; for (const r of roads) for (let i = 0; i + 1 < r.pts.length / 2; i++, q++) { const L = r.s[i + 1] - r.s[i]; M[q * 2] = r.m[i] * L; M[q * 2 + 1] = r.m[i + 1] * L; }
+  data.seg = { S, R, I, B, M, n }; data.segIdx = csr(n, (k, f) => f(S[k * 6], S[k * 6 + 1], S[k * 6 + 2], S[k * 6 + 3], INF[roads[R[k]].kind]));
 }

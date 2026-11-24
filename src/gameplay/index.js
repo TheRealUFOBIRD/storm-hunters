@@ -43,7 +43,7 @@ export async function create(ctx) {
     profile: P, economy: profile, types, GEAR_UPGRADES, VEHICLE_UPGRADES, STORY, tools, missions, waypoint: null, threat: { level: 0, dist: Infinity, tornado: null, closing: 0, eta: 0, cpa: 0, heading: 0 }, danger: { active: false, mult: 1, pot: 0, rate: 0, viewers: 0, closeness: 0 }, intercept: null, prompt: null, hint: null, subtitle: null, swept: null, rankName, repForLevel, handlesNetTool: true,
     get activeTool() { return tools.st.active; }, get drone() { return tools.drone; }, get probes() { return tools.probes.list; }, get scanning() { return tools.st.scan.on; }, get mode() { return ctx.player.mode; },
     selectTool: (id) => tools.select(id), accept: (id) => missions.accept(id), abandon: (id) => missions.abandon(id), track: (id) => { missions.track(id); const m = missions.marker(); if (m) G.setWaypoint(m.x, m.z, m.label, { kind: 'mission' }); },
-    buyVehicle: (id) => profile.buyVehicle(id), selectVehicle: (id) => profile.select(id), buyUpgrade: (k, v) => { const r = profile.buyUpgrade(k, v || P.current); applyMods(true); return r; },
+    buyVehicle: (id) => { const ok = profile.buyVehicle(id); if (ok) G.deliverVehicle(id); return ok; }, selectVehicle: (id) => { const ok = profile.select(id); if (ok) G.deliverVehicle(id); return ok; }, buyUpgrade: (k, v) => { const r = profile.buyUpgrade(k, v || P.current); applyMods(true); return r; },
     createProbeVisual: () => probeModel(), createDroneVisual: () => droneModel(), syncViewModel: (dt) => tools.syncView(dt), trackCone, warningPolygon, approach,
     setWaypoint(x, z, label = 'Waypoint', o = {}) { let route = null; const p = pos(); try { route = ctx.world.route?.(p.x, p.z, x, z) || null; } catch (e) { console.error('[route]', e); } G.waypoint = { x, z, label, kind: o.kind || 'user', route, dist: 0, rem: 0, turn: 0, turnDist: 0, eta: 0 }; wpT = 4; updateWaypoint(); if (!o.silent) ctx.events.emit('waypoint:set', G.waypoint); return G.waypoint; },
     clearWaypoint() { G.waypoint = null; ctx.events.emit('waypoint:clear'); },
@@ -57,9 +57,17 @@ export async function create(ctx) {
     refuel() { const s = G.serviceInfo(); if (!s.vehicle || s.vehicle.fuel > 0.985) return false; if (!profile.pay(s.fuelCost, 'Fuel')) return poor(); if (ctx.vehicles.refuel) ctx.vehicles.refuel(s.vehicle); else s.vehicle.fuel = 1; ctx.audio?.play?.('refuel'); ctx.events.emit('service', { kind: 'fuel', cost: s.fuelCost, inTown: s.inTown }); return true; },
     repair() { const s = G.serviceInfo(); if (!s.vehicle || !(s.vehicle.damage > 0.015)) return false; if (!profile.pay(s.repairCost, 'Repair')) return poor(); if (ctx.vehicles.repair) ctx.vehicles.repair(s.vehicle); else s.vehicle.damage = 0; ctx.audio?.play?.('repair'); ctx.events.emit('service', { kind: 'repair', cost: s.repairCost, inTown: s.inTown }); return true; },
     restock() { tools.probes.restock(); return true; },
-    deliverVehicle(id) { // swap active vehicle in town
-      if (!P.owned.includes(id)) return false; profile.select(id); if (ctx.state === 'menu') return true; const s = G.serviceInfo(); if (!s.inTown) { ctx.ui?.notify?.({ title: 'Not in town', text: 'Vehicle will be waiting at your next stop.', kind: 'info' }); return true; }
-      const p = pos(), r = ctx.world.roads?.nearest?.(p.x, p.z), x = r ? r.x : p.x, z = r ? r.z : p.z, h = r ? dirToHeading(r.dirX, r.dirZ) : 0, old = ctx.player.vehicle; if (old && typeId(old) === id) return true; if (old) { ctx.player.exit?.(); (ctx.vehicles.remove || ctx.vehicles.despawn)?.call(ctx.vehicles, old); } const v = ctx.vehicles.spawn(id, x, z, h); if (v) { v.mods = profile.vehicleMods(id); ctx.player.enter?.(v); } return true;
+    deliverVehicle(id) { // give the player the selected vehicle now: swap in place when driving, deliver beside them when on foot
+      if (!P.owned.includes(id)) return false; if (P.current !== id) profile.select(id); if (ctx.state === 'menu' || !ctx.vehicles?.spawn) return true;
+      const pl = ctx.player, mode = pl.mode, cur = mode === 'drive' ? pl.vehicle : null; if (cur && typeId(cur) === id) return true;
+      if (mode !== 'drive' && mode !== 'foot') { ctx.ui?.notify?.({ title: types[id]?.name || 'Vehicle', text: 'Your vehicle will be waiting when you are back on the ground.', kind: 'info' }); return true; }
+      const old = cur || (pl.lastVehicle && ctx.vehicles.list.includes(pl.lastVehicle) ? pl.lastVehicle : null), spot = deliverySpot(id, cur);
+      if (!spot) { ctx.ui?.notify?.({ title: 'No room', text: 'Move to open ground or a road to take delivery.', kind: 'warn' }); return false; }
+      if (old) { stash[typeId(old)] = { fuel: old.fuel, damage: old.damage }; if (ctx.vehicles.active === old) ctx.vehicles.active = null; ctx.vehicles.remove(old); }
+      const v = ctx.vehicles.spawn(id, spot.x, spot.z, spot.h); if (!v) return false; const st = stash[id]; if (st) { v.fuel = st.fuel; v.damage = st.damage; }
+      if (spot.vel && v.body) { v.body.v.copy(spot.vel); if (spot.w) v.body.w.copy(spot.w); } if (cur) v.headlights = cur.headlights;
+      v.mods = profile.vehicleMods(id); ctx.vehicles.setMods?.(v, v.mods); pl.lastVehicle = v; pl.enter?.(v);
+      ctx.events.emit('vehicle:delivered', { v, id, prev: old ? typeId(old) : null }); ctx.ui?.notify?.({ title: types[id]?.name || 'Vehicle', text: cur ? 'Keys handed over. Your old vehicle goes back to the garage.' : 'Delivered beside you.', kind: 'good', ttl: 3 }); return true;
     },
     // ---- spotter reports
     reportKinds: [['tornado', 'Tornado'], ['funnel', 'Funnel cloud'], ['wallcloud', 'Wall cloud'], ['hail', 'Large hail'], ['wind', 'Damaging wind']],
@@ -87,6 +95,17 @@ export async function create(ctx) {
   tools.G = G;
   const pos = () => ctx.player.vehicle && ctx.player.mode === 'drive' ? ctx.player.vehicle.pos : ctx.player.pos || ctx.camera.position;
   const typeId = (v) => (typeof v.type === 'string' ? v.type : v.type?.id ?? v.typeId);
+  const stash = {}; // fuel/damage of vehicles returned to the garage, so swapping is no free refuel/repair
+  function deliverySpot(id, cur) { // pose for a delivered vehicle
+    if (cur?.body) { const b = cur.body; return { x: b.p.x, z: b.p.z, h: dirToHeading(-b.M[2], -b.M[8]), vel: b.v.clone(), w: b.w.clone() }; }
+    const pl = ctx.player, p = pl.pos || ctx.camera.position, t = types[id] || {}, rad = Math.hypot(t.W || 2.2, t.L || 5.5) / 2 + 0.6;
+    const free = (x, z) => { for (const o of ctx.vehicles.list) if (Math.hypot(o.body.p.x - x, o.body.p.z - z) < rad + (o.body.radius || 3)) return false; if (Math.hypot(p.x - x, p.z - z) < rad + 0.6) return false; try { if (pl.blocked?.(x, z, rad * 0.8)) return false; } catch { /* optional */ } const w = ctx.world, wl = w.waterLevelAt?.(x, z) ?? -1e9; return !(wl > w.heightAt(x, z) + 0.3); };
+    const r = ctx.world.roads?.nearest?.(p.x, p.z), C = [];
+    if (r && (r.dist ?? Math.hypot(r.x - p.x, r.z - p.z)) < 60) { let h = dirToHeading(r.dirX, r.dirZ); if (Math.abs(((h - (pl.heading || 0) + Math.PI * 3) % (Math.PI * 2)) - Math.PI) > Math.PI / 2) h += Math.PI; const fx = Math.sin(h), fz = -Math.cos(h), side = r.width ? r.width * 0.25 : 2;
+      for (const along of [0, 8, -8, 16, -16]) C.push({ x: r.x - fz * side + fx * along, z: r.z + fx * side + fz * along, h }); }
+    const h0 = pl.heading || 0; for (const d of [6, 9, 13]) for (let i = 0; i < 8; i++) { const a = h0 + Math.PI / 2 + i * Math.PI / 4; C.push({ x: p.x + Math.sin(a) * d, z: p.z - Math.cos(a) * d, h: h0 }); }
+    return C.find((c) => free(c.x, c.z)) || null;
+  }
   const poor = () => { ctx.ui?.notify?.({ title: 'Not enough money', text: 'Sell photos or take a contract.', kind: 'bad' }); return false; };
   function nearestStation(x, z) { const L = ctx.world.services || ctx.world.gasStations; if (!L) return null; let b = null, bd = 1e9; for (const s of L) { const d = Math.hypot(s.x - x, s.z - z); if (d < bd) { bd = d; b = s; } } return b ? { x: b.x, z: b.z, d: bd } : null; }
   function applyMods(force) { for (const v of ctx.vehicles.list || []) if (!v.remote && (force || !v.mods)) { v.mods = profile.vehicleMods(typeId(v)); ctx.vehicles.setMods?.(v, v.mods); } }

@@ -51,6 +51,8 @@ export async function create(ctx) {
     spawn(type, x, z, heading = 0) { if (!SPECS[type]) type = TYPE_IDS[0]; const v = new Vehicle(sys, type, x, z, heading); sys.list.push(v); ctx.events.emit('vehicle:spawn', { v }); return v; },
     remove(v) { const i = sys.list.indexOf(v); if (i >= 0) sys.list.splice(i, 1); if (sys.active === v) sys.active = null; v.dispose(); },
     clear() { for (const v of [...sys.list]) sys.remove(v); },
+    // profile upgrades -> physics multipliers (see gameplay/profile.js VEHICLE_UPGRADES.mod)
+    setMods(v, m = {}) { const b = v?.body; if (!b) return; v.mods = m; b.powerMul = m.power ?? 1; b.gripMul = m.grip ?? 1; b.looseMul = (m.looseGrip ?? 1) / (m.grip ?? 1); b.armorMul = m.armor ?? 1; b.massMul = m.mass ?? 1; b.fuelMul = m.fuel ?? 1; b.holdMul = m.anchor ?? 1; },
     repair(v) { v.repair(); }, refuel(v) { v.fuel = 1; v.body.engineOn = true; },
     recover(v) {
       const w = ctx.world, b = v.body, r = w.roads?.nearest?.(b.p.x, b.p.z); let x = b.p.x, z = b.p.z, h = dirToHeading(-b.M[2], -b.M[8]);
