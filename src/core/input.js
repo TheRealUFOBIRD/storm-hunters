@@ -21,8 +21,9 @@ export function createInput(canvas) {
     const snap = () => { padBase = { a: [...p.axes], b: p.buttons.map((b) => b.value) }; };
     if (!padBase || padId !== p.id) { padId = p.id; snap(); settle = 30; streak = 0; return false; }
     if (settle > 0) { settle--; snap(); return false; }
+    // a clear, sustained move away from the rest values (button press, trigger pull, stick push) activates the pad
     let dev = false;
-    for (let i = 0; i < p.axes.length && !dev; i++) if (Math.abs(p.axes[i] - (padBase.a[i] ?? 0)) > 0.35) dev = true;
+    for (let i = 0; i < p.axes.length && !dev; i++) if (Math.abs(p.axes[i] - (padBase.a[i] ?? 0)) > 0.5) dev = true;
     for (let i = 0; i < p.buttons.length && !dev; i++) if (Math.abs(p.buttons[i].value - (padBase.b[i] ?? 0)) > 0.35) dev = true;
     streak = dev ? streak + 1 : 0;
     return streak >= 4;

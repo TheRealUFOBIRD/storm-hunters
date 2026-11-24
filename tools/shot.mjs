@@ -12,6 +12,8 @@ const b = await puppeteer.launch({ browser: 'firefox', executablePath: FF, headl
 let code = 0;
 try {
   const p = await b.newPage(); await p.setViewport({ width: +o('w', 1600), height: +o('h', 900) });
+  // isolate tests from controllers physically connected to this machine (set PAD=1 to allow them)
+  if (!process.env.PAD) await p.evaluateOnNewDocument(() => { Object.defineProperty(navigator, 'getGamepads', { value: () => [], configurable: true }); });
   let n = 0;
   p.on('console', m => { if (n++ < +o('maxlog', 80)) console.log(`[${m.type()}] ${m.text()}`.slice(0, 1500)); });
   p.on('pageerror', e => { code = 1; console.log('[PAGEERROR]', e.message, (e.stack || '').slice(0, 800)); });

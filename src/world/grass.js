@@ -42,7 +42,7 @@ export function createGrass(ctx, S) {
       float hgt=iC.w*(.65+.6*fract(rnd*13.7+aS.y))*fade; float ang=rnd*6.2832; float ca=cos(ang),sa=sin(ang);
       vec3 p=vec3(position.x*ca-position.z*sa,0.,position.x*sa+position.z*ca); float wid=mix(1.,2.6,smoothstep(8.,uN.y,dc))*(iC.w>1.2?3.:1.); p.xz*=wid;
       float t=position.y; ${BEND}
-      vec3 transformed=wb+vec3(p.x+off.x+(rnd-.5)*.2*t*hgt,yy,p.z+off.y); vCol=iC.rgb; vT=t;${typeof location!=='undefined'&&location.search.includes('grassdbg')?'vCol=vec3(0.,0.,.5);':''}`)
+      vec3 transformed=wb+vec3(p.x+off.x+(rnd-.5)*.2*t*hgt,yy,p.z+off.y); vCol=iC.rgb; vT=t;`)
       .replace('#include <project_vertex>', 'vec4 mvPosition=viewMatrix*vec4(transformed,1.); gl_Position=projectionMatrix*mvPosition; if(fade<=0.) gl_Position=vec4(2.,2.,2.,1.);')
       .replace('#include <worldpos_vertex>', 'vec4 worldPosition=vec4(transformed,1.);');
     FRAG(sh);
@@ -150,7 +150,7 @@ export function createGrass(ctx, S) {
       float t=vi>1.5?1.:0.; vec3 wb=vec3(p2.x+co.x,gy-.04-dc*.0004,p2.y+co.y); ${BEND}
       float sd=vi<.5?-.5:(vi<1.5?.5:0.);
       vec3 transformed=wb+vec3(rd.x*bw*sd+off.x+(r0-.5)*.3*t*hgt,yy,rd.y*bw*sd+off.y);
-      vCol=cc.rgb*cc.rgb; vT=t;${typeof location!=='undefined'&&location.search.includes('grassdbg')?'vCol=vec3(.4,0.,0.);':''}`)
+      vCol=cc.rgb*cc.rgb; vT=t;`)
       .replace('#include <project_vertex>', 'vec4 mvPosition=viewMatrix*vec4(transformed,1.); gl_Position=projectionMatrix*mvPosition; if(kill) gl_Position=vec4(2.,2.,2.,1.);')
       .replace('#include <worldpos_vertex>', 'vec4 worldPosition=vec4(transformed,1.);');
     FRAG(sh);

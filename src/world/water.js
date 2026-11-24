@@ -162,6 +162,7 @@ void main(){
 #ifdef PIPE
   vec3 fwd = -vec3(viewMatrix[0][2], viewMatrix[1][2], viewMatrix[2][2]);
   float zs = sdepth(uv); sd = zs/max(dot(rd,fwd),.02); path = max(sd-dist, 0.);
+  if(zs < 59000. && sd < dist - .3 - dist*.003) discard; // belt and braces: never draw over opaque geometry in front of the surface
   vec3 B = cam + rd*sd; depthV = max(P.y - B.y, 0.); if(zs > 59000.) { depthV = 60.; path = 200.; }
 #endif
   if(ty==0){ // ocean: macro depth + turbidity
@@ -261,7 +262,7 @@ void main(){
   float edge = smoothstep(0., .08 + dist*.0015, depthV);
   bool river = dot(vW.xy,vW.xy) > 1e-6;
   // per-vertex mask: never over roads/shoulders or where the bank is missing; soft ribbon border
-  if(river) edge *= smoothstep(.15,.85,vM)*(1.-smoothstep(.82,1.,abs(vW.w)));
+  if(river) edge *= sat(vM*1.15-.05)*(1.-smoothstep(.8,1.,abs(vW.w)));
   { vec4 mk = texture2D(uDep, (P.xz-uDepXf.xy)*uDepXf.zw); // clip ocean / lake planes to the real coast / shore
     if(ty==0) edge *= 1.-smoothstep(150., 260., (mk.a*255.-128.)*8.);
     else if(!river) edge *= 1.-smoothstep(20., 70., (mk.b*255.-128.)*8.);
@@ -369,25 +370,26 @@ export function createWater(ctx, S, shared) {
   // the water over road carriageways/shoulders (fords, roads graded below the river) and where the bank is missing (perched water).
   const ranked = [...data.rivers].sort((a, b) => Math.max(...a.w) - Math.max(...b.w)), O = S.O, sst = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
   const inLake = (x, z, y) => { const i = Math.round((x - OX) / CELL), j = Math.round((z - OZ) / CELL); if (i < 0 || j < 0 || i >= GX || j >= GZ || !data.lakeI) return false; const li = data.lakeI[j * GX + i]; return li !== 255 && data.lakes[li].level > .5 && y <= data.lakes[li].level + .6 && S.groundAt(x, z) < data.lakes[li].level; };
-  const COLS = [-1, -.8, -.55, -.28, 0, .28, .55, .8, 1], NC = COLS.length; let riverVerts = 0, masked = 0;
+  const COLS = [-1, -.72, -.4, 0, .4, .72, 1], NC = COLS.length; let riverVerts = 0, masked = 0;
   ranked.forEach((r, rank) => {
     const n = r.y.length; if (n < 2) return; const down = r.y[n - 1] <= r.y[0] ? 1 : -1, ty = riverType(r.name), yo = .01 + rank * .004;
     const tan = (i) => { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = r.pts[b * 2] - r.pts[a * 2], tz = r.pts[b * 2 + 1] - r.pts[a * 2 + 1]; const l = Math.hypot(tx, tz) || 1; return [tx / l, tz / l, Math.abs(r.y[b] - r.y[a]) / l]; };
-    const pos = [], w4 = [], mm = [], idx = []; let run = 0;
+    let pos = [], w4 = [], mm = [], idx = [], run = 0;
+    const flush = (keep) => { riverVerts += pos.length / 3; if (idx.length) add(mk(pos, w4, idx, mm), 0); if (keep) { pos = pos.slice(-NC * 3); w4 = w4.slice(-NC * 4); mm = mm.slice(-NC); } else { pos = []; w4 = []; mm = []; } idx = []; };
     const row = (x, z, y, hw, tx, tz, slope) => {
-      if (inLake(x, z, y)) { run = 0; return; }
+      if (inLake(x, z, y)) { if (run) flush(false); run = 0; return; }
       const sp = Math.min(2.6, .55 + Math.sqrt(hw * 2) * .06 + slope * 900) * down, W = hw + 6;
       for (const s of COLS) { const px = x - tz * W * s, pz = z + tx * W * s, h = S.heightAt(px, pz), rc = Math.min(O.eMaj, O.eStr, O.eGrv);
-        let k = O.deck ? 1 : sst(2, 6, rc); if (Math.abs(s) * W > hw && h < y - .12) k = 0; if (k < .5) masked++;
+        let k = O.deck ? 1 : sst(1.5, 7, rc); if (Math.abs(s) * W > hw) k *= 1 - sst(.15, .9, y - h); if (k < .5) masked++;
         pos.push(px, y + yo, pz); w4.push(tx * sp, tz * sp, ty, s); mm.push(k); }
-      const v = pos.length / 3 - NC; if (run) for (let c = 0; c < NC - 1; c++) { const a = v - NC + c, b = v + c; idx.push(a, b, a + 1, a + 1, b, b + 1); } run++;
+      const v = pos.length / 3 - NC; if (run) for (let c = 0; c < NC - 1; c++) { const a = v - NC + c, b = v + c; idx.push(a, b, a + 1, a + 1, b, b + 1); } run++; if (run >= 160) { flush(true); run = 1; }
     };
     for (let i = 0; i < n - 1; i++) {
-      const x0 = r.pts[i * 2], z0 = r.pts[i * 2 + 1], x1 = r.pts[i * 2 + 2], z1 = r.pts[i * 2 + 3], L = Math.hypot(x1 - x0, z1 - z0), K = Math.max(1, Math.ceil(L / 8)), t0 = tan(i), t1 = tan(i + 1);
+      const x0 = r.pts[i * 2], z0 = r.pts[i * 2 + 1], x1 = r.pts[i * 2 + 2], z1 = r.pts[i * 2 + 3], L = Math.hypot(x1 - x0, z1 - z0), K = Math.max(1, Math.ceil(L / 12)), t0 = tan(i), t1 = tan(i + 1);
       for (let k = 0; k < K + (i === n - 2 ? 1 : 0); k++) { const f = k / K; let tx = t0[0] + (t1[0] - t0[0]) * f, tz = t0[1] + (t1[1] - t0[1]) * f; const l = Math.hypot(tx, tz) || 1;
         row(x0 + (x1 - x0) * f, z0 + (z1 - z0) * f, r.y[i] + (r.y[i + 1] - r.y[i]) * f, (r.w[i] + (r.w[i + 1] - r.w[i]) * f) / 2, tx / l, tz / l, t0[2]); }
     }
-    riverVerts += pos.length / 3; if (idx.length) add(mk(pos, w4, idx, mm), 0);
+    flush(false);
   });
   console.log(`[water] rivers: ${riverVerts} verts, ${masked} masked (roads / missing banks)`);
 
@@ -396,7 +398,7 @@ export function createWater(ctx, S, shared) {
   const _a = new THREE.Vector3(), _b = new THREE.Vector3();
   const spray = []; // tornadoes currently over water: [{x,z,y,r,amount}] (hook for FX spray)
   function update() {
-    const c = ctx.camera.position; ocean.position.set(Math.round(c.x / 2) * 2, 0, Math.round(c.z / 2) * 2); ocean.visible = S.coastAt(c.x, c.z) < 45000;
+    const c = ctx.camera.position; ocean.position.set(Math.round(c.x / 2) * 2, 0, Math.round(c.z / 2) * 2); ocean.visible = S.coastAt(c.x, c.z) < 20000 + Math.max(0, c.y - S.heightAt(c.x, c.z)) * 25;
     // smoothed local wind; strengthens with gusts
     const gw = G.uWind.value, gust = G.uGust?.value || 0; wind.lerp(gw, .02); const ws = wind.length(); wsS += (ws * (1 + gust * .35) - wsS) * .02;
     u.uWind.value.copy(wind); if (ws > .05) u.uWindDir.value.set(wind.x / ws, wind.y / ws);

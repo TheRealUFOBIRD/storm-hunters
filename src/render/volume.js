@@ -346,7 +346,7 @@ void main(){
   vec4 w=uInvVP*vec4(uv*2.-1.,.5,1.); vec3 rd=normalize(w.xyz/w.w-uCam);
   float md=min(shLinearDepth(textureLod(uDepth,uv,0.).r,uDepthK)/max(dot(rd,uFwd),.05),60000.);
   vec2 k=uRes/uLRes; vec2 lp=uv*uLRes-.5-uJit; ivec2 c0=ivec2(floor(lp+.5)), mx=ivec2(uLRes)-1;
-  float sg=max(k.x*.62,.75); sg=1./(2.*sg*sg); // spatial kernel (full px)
+  float sg=max(k.x*.5,.6); sg=1./(2.*sg*sg); // reconstruction kernel: gaussian, sigma = half a raymarch texel (full px)
   vec4 s=vec4(0.),sh=vec4(0.),m1=vec4(0.),m2=vec4(0.),mn=vec4(9.),mxv=vec4(-9.); float ws=1e-6,wsh=0.,wm=1e-6,dsum=0.;
   for(int y=-1;y<=1;y++)for(int x=-1;x<=1;x++){
     ivec2 q=clamp(c0+ivec2(x,y),ivec2(0),mx); vec4 v=texelFetch(uCur,q,0); vec2 vd=texelFetch(uCurD,q,0).xy;
@@ -355,12 +355,14 @@ void main(){
     if(vd.y>md*1.15){ float kk=smoothstep(md*1.35,md*.6,vd.x); v=mix(vec4(0.,0.,0.,1.),v,kk); er*=.35+.65*kk; }
     vec2 d=(vec2(q)+.5+uJit)*k-fp; float d2=dot(d,d); float wd=exp(-er*9.);
     vec4 e=E(v); float g=exp(-d2*sg)*(wd+1e-4); s+=e*g; ws+=g; dsum+=min(vd.x,60000.)*g;
-    float gs=exp(-d2*1.8)*wd; sh+=e*gs; wsh+=gs; // samples within ~half a full-res pixel: the sharp truth
     float wn=wd*exp(-d2*sg*.25); m1+=e*wn; m2+=e*e*wn; wm+=wn; if(wd>.25){ mn=min(mn,e); mxv=max(mxv,e); }
   }
   vec4 sp=s/ws; float cdep=dsum/ws; if(mn.x>8.){ mn=sp; mxv=sp; }
   m1/=wm; m2/=wm; vec4 sd=sqrt(max(m2-m1*m1,vec4(0.)));
-  float hit=sat(wsh*1.6); vec4 cur=mix(sp,sh/max(wsh,1e-6),sat(wsh*4.)*.65);
+  // confidence = how much fresh sample weight landed on this pixel this frame, relative to the average (2*pi*sigma^2 in
+  // raymarch texels). Blending by confidence (instead of snapping to the nearest sparse sample) keeps edges from
+  // re-snapping to each frame's jitter lattice, which read as shaking clouds.
+  float conf=ws/1.571; vec4 cur=sp;
   // reprojection at the cloud depth (+ swirl inside tornadoes)
   vec3 p=uCam+rd*min(cdep,md); float mov=0.;
   for(int i=0;i<uNT;i++){ vec4 a=uT0[i]; float h=p.y-a.z; if(h<-40.||h>a.w*1.1) continue; vec4 pr=textureLod(uTProf,vec2(clamp(h/(a.w*1.25),0.,1.),(float(i)+.5)/float(NT)),0.); vec2 q=p.xz-a.xy-pr.xy; float r=length(q); float lim=max(pr.z*1.6,uT2[i].x*1.4); if(r>lim) continue;
@@ -369,15 +371,15 @@ void main(){
   if(pc.w<=0.||any(lessThan(puv,vec2(.5/uRes)))||any(greaterThan(puv,1.-.5/uRes))||uReset>.5){ o0=vec4(dec(toR(sp.rgb)),sat(sp.a)); o1=vec4(cdep,md,0.,1.); return; }
   vec4 h=hist(puv); vec4 hd=textureLod(uHistD,puv,0.);
   // neighbourhood clip (YCoCg + transmittance) against the jittered low-res samples
-  vec2 vel0=(puv-uv)*uRes; float g=mix(mix(2.3,1.25,sat(length(vel0)*.08)),1.1,mov); vec4 lo=max(m1-g*sd,mn-.015), hi=min(m1+g*sd,mxv+.015); lo=min(lo,cur); hi=max(hi,cur);
+  vec2 vel0=(puv-uv)*uRes; float g=mix(2.,1.3,mov); vec4 lo=max(m1-g*sd,mn-.015), hi=min(m1+g*sd,mxv+.015); lo=min(lo,cur); hi=max(hi,cur);
   vec4 cc=.5*(lo+hi), ee=.5*(hi-lo)+1e-4, vv=h-cc; vec4 av=abs(vv/ee); float km=max(max(av.x,av.y),max(av.z,av.w)); vec4 hc=km>1.?cc+vv/km:h;
   float clampAmt=length((h-hc).xyz)+abs(h.a-hc.a);
   // scene disocclusion (history saw a different surface)
   float ds=abs(hd.y-md)/max(min(hd.y,md),1.); float dis=smoothstep(.1,.4,ds)*step(min(hd.y,md),59000.);
   vec2 vel=(puv-uv)*uRes;
-  float a=mix(uAlpha*.5,.2,hit);               // a fresh sample right here dominates, otherwise keep refining
-  a=max(a,min(.22,length(vel)*.006)); a=mix(a,max(a,.25),smoothstep(.04,.35,clampAmt)); a=max(a,mov*.18);
-  a=mix(a,.85,dis); cur=mix(cur,sp,dis*(1.-hit));
+  // camera motion is reprojected exactly (rotation) or at the cloud depth, so no velocity-based history rejection
+  float a=uAlpha*clamp(conf,.3,2.); a=mix(a,max(a,.12),smoothstep(.1,.5,clampAmt)); a=max(a,mov*.09);
+  a=mix(a,.85,dis);
   vec4 r=mix(hc,cur,a); o0=vec4(dec(toR(r.rgb)),sat(r.a)); o1=vec4(cdep,md,0.,1.);
 }`;
 const COPY2 = HEAD + /* glsl */`in vec2 vUv; layout(location=0) out vec4 o0; layout(location=1) out vec4 o1; uniform sampler2D uA,uB; void main(){ o0=textureLod(uA,vUv,0.); o1=textureLod(uB,vUv,0.); }`;

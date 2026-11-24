@@ -245,7 +245,9 @@ export function createTerrain(ctx, S, pool, mat, shared) {
     g.boundingSphere.radius = Math.max(.75, Math.hypot(.71, (r.max - r.min) / 2 / n.size + .05)); m.matrix.makeScale(n.size, 1, n.size); m.matrix.setPosition(n.x, 0, n.z); m.matrixWorld.copy(m.matrix); m.matrixWorldNeedsUpdate = false;
     n.mesh = m; n.has = true; n.min = r.min; n.max = r.max; cacheN++; all.push(n);
   };
-  const request = (n, pri) => { if (n.req || n.has || pending.size > 26) return; n.req = 1; pending.add(n); pool.request('chunk', { x: n.x, z: n.z, size: n.size }, pri, (r) => onChunk(n, r), () => genChunk(S, n.x, n.z, n.size)); };
+  // terrain jobs always run before other pool work (scatter sectors etc.): without ground nothing else reads right, and a
+  // starved chunk queue left the whole terrain missing for ~40 s after spawn (water / backdrop showed through as white patches)
+  const request = (n, pri) => { if (n.req || n.has || pending.size > 26) return; n.req = 1; pending.add(n); pool.request('chunk', { x: n.x, z: n.z, size: n.size }, pri - 1e9, (r) => onChunk(n, r), () => genChunk(S, n.x, n.z, n.size)); };
   const cam = { x: 0, z: 0, agl: 0 }; let drawn = 0, missing = 0;
   const distTo = (n) => { const dx = Math.max(n.x - cam.x, 0, cam.x - n.x - n.size), dz = Math.max(n.z - cam.z, 0, cam.z - n.z - n.size); return Math.sqrt(dx * dx + dz * dz + cam.agl * cam.agl); };
   function visit(n, d) { // returns true if node area is fully covered
