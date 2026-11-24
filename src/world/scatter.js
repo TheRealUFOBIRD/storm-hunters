@@ -76,7 +76,7 @@ export function createScatter(ctx, S, pool, tex) {
   const varOf = (A, seed) => (A.vars.length > 1 ? Math.floor(seed * 7919) % A.vars.length : 0);
   // ---------- real models (async, fail-soft: kinds keep the procedural geometry if anything is missing)
   let modelsOn = false, imp = null, impMat = null; const impFade = { value: new THREE.Vector4(IMP, R - 250, 1400, Math.max(2000, R - 600)) };
-  loadNature({ aniso: 4 }).then((map) => { try { applyModels(map); } catch (e) { console.warn('[nature] apply failed', e); } }).catch((e) => console.warn('[nature] load failed', e));
+  loadNature({ aniso: 4 }).then((map) => { try { applyModels(map); } catch (e) { console.warn('[nature] apply failed', e); } }).catch((e) => console.warn('[nature] load failed', e)).finally(() => { group.userData.natureDone = true; });
   function applyModels(map) {
     for (const [name, vs] of map) {
       const kd = KI[name]; if (kd === undefined) continue; const A = arch[kd], K = A.K, lod = K.lod, tree = K.cls === 'tree';

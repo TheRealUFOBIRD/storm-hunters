@@ -31,7 +31,8 @@ export async function create(ctx) {
   const DM = 1024, DR = 4, dmask = new Uint8Array(DM * DM), dtex = dataTex(dmask, DM, DM, THREE.RedFormat, true); shared.uDmg.value = dtex; const dorg = shared.uDmgOrg.value; dorg.set(-DM * DR / 2, -DM * DR / 2, DM * DR); let dDirty = 0;
   const mat = createTerrainMaterial(ctx, tex, data, shared), terrain = createTerrain(ctx, S, pool, mat, shared), roads = createRoads(ctx, S, tex, shared), scatter = createScatter(ctx, S, pool, tex), water = createWater(ctx, S, shared), grass = createGrass(ctx, S);
   let router = null; const getRouter = () => (router ||= makeRouter(S));
-  const lines = data.roads.filter((r) => r.k <= 1).map((r) => ({ kind: r.kind, name: r.name, width: r.hw * 2, pts: r.pts }));
+  // all roads; minor ones (k 2 street, 3 gravel) are tagged 'minor' so maps draw them faint and hide them when zoomed out
+  const lines = data.roads.map((r) => ({ kind: r.k <= 1 ? r.kind : 'minor ' + (r.k === 2 ? 'street' : 'gravel'), name: r.name, width: r.hw * 2, pts: r.pts }));
   const bounds = { ...BOUNDS }, surf = { type: 'grass', grip: .7, wetGrip: .5, rollRes: .035, bump: .03, dust: .35 }, nv = new THREE.Vector3();
   let mapCanvas = null; const breakQ = [];
   const city = createBuildings(ctx, S, scatter, tex, data); // CITIES
@@ -64,7 +65,10 @@ export async function create(ctx) {
   function recentre(cx, cz) { const nx = Math.round((cx - DM * DR / 2) / 256) * 256, nz = Math.round((cz - DM * DR / 2) / 256) * 256; if (Math.abs(nx - dorg.x) < 1200 && Math.abs(nz - dorg.y) < 1200) return; const di = Math.round((nx - dorg.x) / DR), dj = Math.round((nz - dorg.y) / DR), old = dmask.slice(); dmask.fill(0); for (let j = 0; j < DM; j++) { const sj = j + dj; if (sj < 0 || sj >= DM) continue; for (let i = 0; i < DM; i++) { const si = i + di; if (si >= 0 && si < DM) dmask[j * DM + i] = old[sj * DM + si]; } } dorg.x = nx; dorg.y = nz; dDirty = 1; }
   let dmT = 0;
   const w = {
-    S, data, bounds, cities: data.cities, water, stats: () => ({ ...terrain.stats(), ...roads.stats(), ...scatter.stats(), ...city.stats(), pool: pool.size }),
+    S, data, bounds, cities: data.cities, water,
+    // boot/loading-screen readiness: procedural texture bake, photo scans uploaded, nature models applied, streaming idle
+    loadState() { const g = mat.userData?.ground; const scans = g ? (g.total ? Math.min(1, (g.loaded + g.failed) / g.total) : 1) : 1; return { tex: !!tex.done, scans, scansQueued: g ? g.ready.length : 0, nature: !!scatter.group.userData.natureDone, terrain: terrain.idle(), grass: grass.idle?.() ?? true }; },
+    stats: () => ({ ...terrain.stats(), ...roads.stats(), ...scatter.stats(), ...city.stats(), pool: pool.size }),
     heightAt: S.heightAt, terrainAt: S.terrainAt,
     normalAt(x, z, o = nv) { const e = 1; return o.set(S.heightAt(x - e, z) - S.heightAt(x + e, z), 2 * e, S.heightAt(x, z - e) - S.heightAt(x, z + e)).normalize(); },
     surfaceAt, biomeAt, waterLevelAt: S.waterLevelAt, isLand: (x, z) => S.waterLevelAt(x, z) === -Infinity, stateAt: S.stateAt,

@@ -40,7 +40,7 @@ function createGroundArrays(ctx, tex, uA, uN) {
       void main(){ if(uMode<.5){ vec3 a=s2l(texture2D(tA,vUv).rgb)*uGain; gl_FragColor=vec4(sqrt(clamp(a,0.,1.)),mk(2.)); }
         else { gl_FragColor=vec4(texture2D(tN,vUv).rg,mix(uR.x,uR.y,mk(0.)),mk(1.)); } }` });
   const scene = new THREE.Scene(), cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1), quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), copy); quad.frustumCulled = false; scene.add(quad);
-  const G = { inited: false, ready: [], loaded: 0, failed: 0, A, N: Nn };
+  const G = { inited: false, ready: [], loaded: 0, failed: 0, total: SCANS.length, A, N: Nn };
   const draw = (renderer, rt, layer, last) => { rt.texture.generateMipmaps = !!last; renderer.setRenderTarget(rt, layer); renderer.render(scene, cam); };
   const withState = (renderer, fn) => { const prev = renderer.getRenderTarget(), pc = renderer.getActiveCubeFace(), pm = renderer.getActiveMipmapLevel(), ac = renderer.autoClear; renderer.autoClear = true; try { fn(); } finally { renderer.setRenderTarget(prev, pc, pm); renderer.autoClear = ac; } };
   function init(renderer) {

@@ -1,77 +1,38 @@
-// Grass / crop blades in three bands, all with wind + tornado flattening in the vertex shader:
-//  near  : CPU-placed 5-blade clumps in 12 m tiles (exact heightAt / road / field tests), dithered hand-over at the outer edge
-//  mid+far: GPU-driven lattice of 3-blade clumps out to ~850 m. Patches (32 m) are picked per frame on the CPU (view wedge),
-//           one instanced draw per LOD. Every lattice point has a level (trailing zero bits of its index); blades thin out
-//           continuously with distance (density ~ 1/d^2, width ~ d: constant on-screen size) so there are no band edges.
-//           Ground height / colour / blade height / density come from two toroidal clipmaps (1 m and 4 m) baked by
-//           grassGen.js in a worker from the same samplers the terrain uses.
+// Grass / crops: one GPU-driven, world-locked lattice of thin blades from the camera out to ~850 m (one instanced draw).
+//  * Lattice spacing S0 (12.5 cm). Each lattice point is a tuft of 3 thin 2-segment blades plus a small ground "thatch"
+//    card in the blade base colour, so gaps between blades read as grass, not soil.
+//  * Every lattice point has a level = trailing zero bits of its index. With distance the lower levels shrink away
+//    (density ~ 1/d^2) while blades widen to stay ~1 px, so there are no LOD bands.
+//  * The CPU emits quadtree nodes (32x32 cells, size 4 m * 2^k) per frame inside the view wedge; node level k is the
+//    coarsest lattice whose points are all still visible.
+//  * Ground height, colour, kind, blade height and density come from three toroidal clipmaps (0.25 m, 1 m, 4 m)
+//    baked by grassGen.js in workers from the same samplers the terrain uses (no grass on roads/water/yards/plowed).
+//  * Wind (ctx.globals.uWind/uGust) with travelling gust waves, tornado flattening (uTornadoA).
 import * as THREE from 'three';
-import { hash2 } from '../core/rng.js';
-import { colFor, bakeRect } from './grassGen.js';
+import { bakeRect } from './grassGen.js';
 
-const T = 12, P = 32, S0 = .5, KMAX = 6, CELLS = P / S0;
-const BEND = /* glsl */`
-  vec2 w=uWind*(1.+uGust*.8*sin(uTime*2.3+wb.x*.15+wb.z*.11)); float fl=0.;
-  for(int i=0;i<4;i++){ vec4 T=uTornadoA[i]; if(T.w<1.) continue; vec2 d=wb.xz-T.xy; float r=max(length(d),1.); float v=T.w*2.*r*T.z/(r*r+T.z*T.z); w+=vec2(d.y,-d.x)/r*v-d/r*v*.35; }
-  float sp=length(w); fl=clamp(sp/30.,0.,.95); vec2 dir=sp>.01?w/sp:vec2(1.,0.);
-  float bend=(.15+.35*th)*clamp(sp/12.,.05,1.4)+.08; float sway=sin(uTime*(1.6+sp*.15)+wb.x*.3+wb.z*.2+th*6.)*.12*clamp(sp/6.,.2,1.);
-  vec2 off=dir*(bend+sway)*t*t*hgt*(1.+fl); float yy=t*hgt*(1.-fl*.75*t);`;
-const FRAG = (sh) => { sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCol; varying float vT;').replace('#include <map_fragment>', 'diffuseColor.rgb=vCol*(.45+.75*vT);').replace('#include <roughnessmap_fragment>', 'float roughnessFactor=1.;').replace('#include <metalnessmap_fragment>', 'float metalnessFactor=0.;').replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal=normalize(mat3(viewMatrix)*vec3(0.,1.,0.)); nonPerturbedNormal=normal;'); };
+const S0 = .125, NC = 32, P0 = NC * S0, KMAX = 8, BL = 3, VPC = BL * 5 + 4;
 
 export function createGrass(ctx, S) {
   const q = ctx.quality.grass ?? .5; if (q <= 0) return { update() {}, group: new THREE.Group(), idle: () => true };
-  const qn = Math.min(1.5, q), RAD = 20 + 26 * qn, PER = Math.round(520 * Math.min(1.2, .6 + q * .5)), RFAR = q >= 1 ? 850 : 260 + 590 * q;
-  const N0 = RAD * .62, N1 = RAD * .95;
+  const qn = Math.min(1.5, q), D0 = 3.2 + 2.6 * qn, RFAR = q >= 1 ? 850 : 260 + 590 * q;
   const group = new THREE.Group(); group.name = 'grass'; ctx.scene.add(group);
   const g = ctx.globals, camP = new THREE.Vector3();
-  const u = { uWind: g.uWind, uGust: g.uGust, uTime: g.uTime, uTornadoA: g.uTornadoA, uCamP: { value: camP }, uN: { value: new THREE.Vector2(N0, N1) } };
 
-  // ================= near band =================
-  const bp = [], bi = [], bs = [];
-  for (let b = 0; b < 5; b++) { const a = b * 2.4 + .3, ox = Math.cos(a * 1.7) * .09 * b, oz = Math.sin(a * 1.3) * .09 * b, ca = Math.cos(a), sa = Math.sin(a), o = bp.length / 3; for (let k = 0; k <= 4; k++) { const t = k / 4, w = .022 * (1 - t * .85); for (const sg of [-1, 1]) { bp.push(ox + ca * w * sg, t, oz + sa * w * sg); bs.push(t, b / 5); } } for (let k = 0; k < 4; k++) { const a0 = o + k * 2; bi.push(a0, a0 + 1, a0 + 3, a0, a0 + 3, a0 + 2); } }
-  const base = new THREE.BufferGeometry(); base.setAttribute('position', new THREE.Float32BufferAttribute(bp, 3)); base.setAttribute('normal', new THREE.Float32BufferAttribute(bp.map((v, i) => (i % 3 === 1 ? 1 : 0)), 3)); base.setAttribute('aS', new THREE.Float32BufferAttribute(bs, 2)); base.setIndex(bi);
-  const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: .8, fog: false }); mat.customProgramCacheKey = () => 'sh-grass-near2';
-  mat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, u);
-    sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
-      attribute vec4 iP; attribute vec4 iC; attribute vec2 aS; uniform vec2 uWind,uN; uniform float uGust,uTime; uniform vec4 uTornadoA[4]; uniform vec3 uCamP; varying vec3 vCol; varying float vT;`)
-      .replace('#include <beginnormal_vertex>', 'vec3 objectNormal=vec3(0.,1.,0.);')
-      .replace('#include <begin_vertex>', `
-      vec3 wb=iP.xyz; float rnd=iP.w; float dc=length(wb.xz-uCamP.xz); float th=fract(rnd*7.31+aS.y*.37);
-      float ho=smoothstep(uN.x,uN.y,dc); float fade=clamp((fract(rnd*31.7)*.8+.2-ho)*5.,0.,1.);
-      float hgt=iC.w*(.65+.6*fract(rnd*13.7+aS.y))*fade; float ang=rnd*6.2832; float ca=cos(ang),sa=sin(ang);
-      vec3 p=vec3(position.x*ca-position.z*sa,0.,position.x*sa+position.z*ca); float wid=mix(1.,2.6,smoothstep(8.,uN.y,dc))*(iC.w>1.2?3.:1.); p.xz*=wid;
-      float t=position.y; ${BEND}
-      vec3 transformed=wb+vec3(p.x+off.x+(rnd-.5)*.2*t*hgt,yy,p.z+off.y); vCol=iC.rgb; vT=t;`)
-      .replace('#include <project_vertex>', 'vec4 mvPosition=viewMatrix*vec4(transformed,1.); gl_Position=projectionMatrix*mvPosition; if(fade<=0.) gl_Position=vec4(2.,2.,2.,1.);')
-      .replace('#include <worldpos_vertex>', 'vec4 worldPosition=vec4(transformed,1.);');
-    FRAG(sh);
-  };
-  const tiles = new Map(), free = []; let need = [];
-  const tmpC = [0, 0, 0, 0], O = S.O;
-  function gen(tx, tz) {
-    const Pa = new Float32Array(PER * 4), Cc = new Float32Array(PER * 4); let n = 0;
-    for (let k = 0; k < PER; k++) {
-      const x = tx * T + hash2(tx * PER + k, tz, 1) * T, z = tz * T + hash2(tx * PER + k, tz, 2) * T, y = S.heightAt(x, z);
-      if (O.eMaj < .8 || O.eStr < 2.6 || O.eGrv < .4 || O.deck || O.eRiv < 2) continue; const f = S.fieldAt(x, z); if (f.crop === 6 || f.crop === 8 || f.yard < 0) continue; const b = S.bio(x, z); if (b.urban > .5 && hash2(k, tx, 3) < .7) continue; if (b.arid > .8 && hash2(k, tz, 4) < .7) continue;
-      if (f.crop === 4 && (Math.abs(((f.dir ? x : z) % .76 + .76) % .76 - .38) > .12)) continue; if (S.waterLevelAt(x, z) > y - .05) continue;
-      colFor(O.eMaj < 15 || O.eStr < 9 || f.edge < 0 ? 0 : f.crop, b, x, z, tmpC); Pa[n * 4] = x; Pa[n * 4 + 1] = y - .03; Pa[n * 4 + 2] = z; Pa[n * 4 + 3] = hash2(k, tx + tz * 977, 9); Cc.set(tmpC, n * 4); n++;
-    }
-    let m = free.pop(); if (!m) { const gg = new THREE.InstancedBufferGeometry(); gg.setIndex(base.index); for (const k of ['position', 'normal', 'aS']) gg.setAttribute(k, base.attributes[k]); gg.setAttribute('iP', new THREE.InstancedBufferAttribute(Pa, 4)); gg.setAttribute('iC', new THREE.InstancedBufferAttribute(Cc, 4)); gg.boundingSphere = new THREE.Sphere(); m = new THREE.Mesh(gg, mat); m.frustumCulled = true; m.receiveShadow = true; m.matrixAutoUpdate = false; group.add(m); }
-    else { const a = m.geometry.attributes; a.iP.array = Pa; a.iP.needsUpdate = true; a.iC.array = Cc; a.iC.needsUpdate = true; }
-    m.geometry.instanceCount = n; m.geometry.boundingSphere.center.set((tx + .5) * T, n ? Pa[1] : 0, (tz + .5) * T); m.geometry.boundingSphere.radius = T * .75 + 2.5; m.visible = n > 0; return m;
-  }
-
-  // ================= clipmaps (mid / far data) =================
-  const LV = [{ c: 1, N: 512, hs: 24 }, { c: 4, N: 512, hs: 24 }].map((l) => {
+  // ================= clipmaps =================
+  const LV = [{ c: .25, N: 256, hs: 16 }, { c: 1, N: 512, hs: 24 }, { c: 4, N: 512, hs: 24 }].map((l) => {
     const H = new Float32Array(l.N * l.N * 2), C = new Uint8Array(l.N * l.N * 4);
     const tH = new THREE.DataTexture(H, l.N, l.N, THREE.RGFormat, THREE.FloatType), tC = new THREE.DataTexture(C, l.N, l.N, THREE.RGBAFormat, THREE.UnsignedByteType);
     for (const t of [tH, tC]) { t.minFilter = t.magFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; }
     return { ...l, H, C, tH, tC, ox: 0, oz: 0, nox: 0, noz: 0, ready: false, busy: 0, win: new THREE.Vector4(1e8, 1e8, l.N, l.c) };
   });
-  Object.assign(u, { uH0: { value: LV[0].tH }, uC0: { value: LV[0].tC }, uWin0: { value: LV[0].win }, uH1: { value: LV[1].tH }, uC1: { value: LV[1].tC }, uWin1: { value: LV[1].win }, uD0: { value: N0 }, uFar: { value: new THREE.Vector2(RFAR * .62, RFAR) }, uPx: { value: .002 } });
+  const u = {
+    uWind: g.uWind, uGust: g.uGust, uTime: g.uTime, uTornadoA: g.uTornadoA, uCamP: { value: camP },
+    uH0: { value: LV[0].tH }, uC0: { value: LV[0].tC }, uWin0: { value: LV[0].win }, uH1: { value: LV[1].tH }, uC1: { value: LV[1].tC }, uWin1: { value: LV[1].win },
+    uH2: { value: LV[2].tH }, uC2: { value: LV[2].tC }, uWin2: { value: LV[2].win }, uD0: { value: D0 }, uFar: { value: new THREE.Vector2(RFAR * .62, RFAR) }, uPx: { value: .0015 },
+  };
   // workers
-  const jobs = new Map(), queue = []; let jid = 1, wk = [], mainThread = false;
+  const jobs = new Map(), queue = [], done = []; let jid = 1, workMs = 0; const wk = []; let mainThread = false;
   try {
     const nW = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 3));
     for (let i = 0; i < nW; i++) {
@@ -81,7 +42,6 @@ export function createGrass(ctx, S) {
       w.postMessage({ t: 'init', data: S.data }); wk.push(o);
     }
   } catch (e) { console.warn('[grass] no worker', e); mainThread = true; }
-  const done = []; let workMs = 0;
   const md = (a, n) => ((a % n) + n) % n;
   function integrate(j, H, C) {
     const l = j.l, N = l.N;
@@ -113,84 +73,124 @@ export function createGrass(ctx, S) {
     const t0 = performance.now(); while (done.length && (performance.now() - t0 < 1.5)) { const [j, H, C] = done.shift(); integrate(j, H, C); }
   }
 
-  // ================= mid / far band =================
-  const fmat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: .8, fog: false }); fmat.customProgramCacheKey = () => 'sh-grass-far1';
-  fmat.onBeforeCompile = (sh) => {
+  // ================= material =================
+  const mat = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 1, metalness: 0, envMapIntensity: .8, fog: false }); mat.customProgramCacheKey = () => 'sh-grass-3';
+  mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, u);
     sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
-      attribute vec3 iPt; uniform vec2 uWind,uN,uFar; uniform float uGust,uTime,uD0,uPx; uniform vec4 uTornadoA[4]; uniform vec3 uCamP; varying vec3 vCol; varying float vT;
-      uniform highp sampler2D uH0,uH1; uniform highp sampler2D uC0,uC1; uniform vec4 uWin0,uWin1;
+      attribute vec3 iPt; uniform vec2 uWind,uFar; uniform float uGust,uTime,uD0,uPx; uniform vec4 uTornadoA[4]; uniform vec3 uCamP;
+      varying vec3 vCol; varying float vT,vS,vF,vB;
+      uniform highp sampler2D uH0,uH1,uH2,uC0,uC1,uC2; uniform vec4 uWin0,uWin1,uWin2;
       uint gS; float rn(){ gS=gS*747796405u+2891336453u; uint w=((gS>>((gS>>28u)+4u))^gS)*277803737u; w=(w>>22u)^w; return float(w>>8u)/16777216.; }
-      int ctz(int v){ if(v==0) return 12; int n=0; for(int i=0;i<12;i++){ if((v&1)!=0) break; v>>=1; n++; } return n; }
+      int ctz(int v){ if(v==0) return 14; int n=0; for(int i=0;i<14;i++){ if((v&1)!=0) break; v>>=1; n++; } return n; }
       bool inW(vec4 W,vec2 p){ vec2 f=p/W.w-W.xy; return f.x>=1.&&f.y>=1.&&f.x<W.z-2.&&f.y<W.z-2.; }
       float gH(highp sampler2D T,vec4 W,vec2 p){ vec2 f=p/W.w; vec2 i=floor(f),a=f-i; float N=W.z;
         float h00=texelFetch(T,ivec2(mod(i,N)),0).r,h10=texelFetch(T,ivec2(mod(i+vec2(1.,0.),N)),0).r,h01=texelFetch(T,ivec2(mod(i+vec2(0.,1.),N)),0).r,h11=texelFetch(T,ivec2(mod(i+vec2(1.),N)),0).r;
-        return mix(mix(h00,h10,a.x),mix(h01,h11,a.x),a.y); }`)
+        return mix(mix(h00,h10,a.x),mix(h01,h11,a.x),a.y); }
+      float groundY(vec2 p){ if(inW(uWin0,p)) return gH(uH0,uWin0,p); if(inW(uWin1,p)) return gH(uH1,uWin1,p); return gH(uH2,uWin2,p); }`)
       .replace('#include <beginnormal_vertex>', 'vec3 objectNormal=vec3(0.,1.,0.);')
       .replace('#include <begin_vertex>', `
       float st=exp2(iPt.z); vec2 Iw=iPt.xy+position.xy*st; ivec2 ii=ivec2(Iw);
       float lev=float(min(ctz(ii.x),ctz(ii.y)));
-      gS=uint(ii.x+1048576)*1664525u^(uint(ii.y+1048576)*1013904223u+374761393u); rn(); rn();
-      float r0=rn(),r1=rn(),r2=rn(),r3=rn(),r4=rn(),r5=rn(),rnd=rn();
-      vec2 p2=(Iw+(vec2(r0,r1)-.5)*exp2(min(lev,6.)))*${S0};
+      float code=position.z; bool thatch=code>=${BL * 8}.; float bl=thatch?0.:floor(code/8.+.01); float vi=thatch?code-${BL * 8}.:code-bl*8.;
+      gS=uint(ii.x+1048576)*1664525u^(uint(ii.y+1048576)*1013904223u+374761393u); rn(); gS+=uint(bl)*2654435761u; rn();
+      float r0=rn(),r1=rn(),r2=rn(),r3=rn(),r4=rn(),r5=rn(),r6=rn(),rnd=rn();
+      float cl=exp2(min(lev,9.));
+      vec2 p2=(Iw+(vec2(r0,r1)-.5)*cl)*${S0};
       float dc=length(p2-uCamP.xz); bool kill=false;
-      float L=log2(max(dc,uD0)/uD0)*.85; float wl=clamp((lev+.75*r2-L)*4.+1.,0.,1.);
-      float wn=clamp((smoothstep(uN.x,uN.y,dc)-r3*.8)*5.,0.,1.), wf=clamp((r4*.8+.2-smoothstep(uFar.x,uFar.y,dc))*5.,0.,1.);
-      float wv=wl*wn*wf; vec2 hb=vec2(0.); vec4 cc=vec4(0.); float gy=0.;
+      float L=log2(max(dc,uD0)/uD0); float wl=clamp((lev+.75*r2-L)*4.+1.,0.,1.);
+      float wf=clamp((r4*.8+.2-smoothstep(uFar.x,uFar.y,dc))*5.,0.,1.);
+      float wv=wl*wf; vec2 hb=vec2(0.); vec4 cc=vec4(0.); float gy=0.;
       if(wv<=.002) kill=true;
       else if(inW(uWin0,p2)){ gy=gH(uH0,uWin0,p2); ivec2 nt=ivec2(mod(floor(p2/uWin0.w+.5),uWin0.z)); hb=texelFetch(uH0,nt,0).rg; cc=texelFetch(uC0,nt,0); }
       else if(inW(uWin1,p2)){ gy=gH(uH1,uWin1,p2); ivec2 nt=ivec2(mod(floor(p2/uWin1.w+.5),uWin1.z)); hb=texelFetch(uH1,nt,0).rg; cc=texelFetch(uC1,nt,0); }
-      if(hb.y<=0.||r5>=cc.a) kill=true;
-      float bl=floor(position.z/3.+.01), vi=position.z-bl*3.; float th=fract(rnd*7.31+bl*.37);
-      float hgt=hb.y*(.65+.6*fract(rnd*13.7+bl*.29))*wv; float corn=hb.y>1.2?2.4:1.;
-      float bw=max(.05,dc*uPx)*corn;
-      float ang=rnd*6.2832+bl*2.1; vec2 rd=vec2(cos(ang),sin(ang)); vec2 tv=p2-uCamP.xz; vec2 fc=normalize(vec2(-tv.y,tv.x)+1e-4); if(dot(fc,rd)<0.) fc=-fc;
-      rd=normalize(mix(rd,fc,smoothstep(25.,90.,dc)*.85)+1e-4);
-      vec2 co=vec2(cos(bl*2.4+rnd*9.),sin(bl*2.4+rnd*9.))*(.06+.12*bl)*max(1.,bw*8.);
-      float t=vi>1.5?1.:0.; vec3 wb=vec3(p2.x+co.x,gy-.04-dc*.0004,p2.y+co.y); ${BEND}
-      float sd=vi<.5?-.5:(vi<1.5?.5:0.);
-      vec3 transformed=wb+vec3(rd.x*bw*sd+off.x+(r0-.5)*.3*t*hgt,yy,rd.y*bw*sd+off.y);
-      vCol=cc.rgb*cc.rgb; vT=t;`)
+      else if(inW(uWin2,p2)){ gy=gH(uH2,uWin2,p2); ivec2 nt=ivec2(mod(floor(p2/uWin2.w+.5),uWin2.z)); hb=texelFetch(uH2,nt,0).rg; cc=texelFetch(uC2,nt,0); }
+      float ab=floor(cc.a*255.+.5), kind=floor(ab/16.), dens=mod(ab,16.)/15.;
+      if(hb.y<=0.||r5>=dens) kill=true;
+      bool corn=kind==4.||kind==10., grassK=kind==0.||kind==1.||kind==11.;
+      if(corn){ float cr=kind>9.?p2.x:p2.y; float rw=abs(fract(cr/.76)-.5)*.76; if(rw>.09+smoothstep(30.,90.,dc)*.3) kill=true; }
+      float tall=(grassK&&r3<.05)?1.45:1.;
+      float hgt=hb.y*(.68+.55*r6)*tall*wv;
+      vec3 col=cc.rgb*cc.rgb*(.86+.28*rnd);
+      // wind with travelling gust waves
+      vec2 w=uWind*(1.+uGust*.8*sin(uTime*2.3+p2.x*.15+p2.y*.11)); float fl=0.;
+      for(int i=0;i<4;i++){ vec4 T=uTornadoA[i]; if(T.w<1.) continue; vec2 d=p2-T.xy; float r=max(length(d),1.); float v=T.w*2.*r*T.z/(r*r+T.z*T.z); w+=vec2(d.y,-d.x)/r*v-d/r*v*.35; }
+      float sp=length(w); fl=clamp(sp/30.,0.,.95); vec2 dir=sp>.01?w/sp:vec2(1.,0.);
+      float wave=sin(dot(p2,dir)*.16-uTime*(1.4+sp*.08)+sin(dot(p2,vec2(-dir.y,dir.x))*.05)*2.)*.5+.5; float ws=clamp(sp/7.,0.,1.);
+      float th=fract(rnd*7.31+bl*.37);
+      float bend=((.12+.3*th)*clamp(sp/12.,.05,1.4)+.06)*(.55+.9*wave*ws+(1.-ws)*.45); float sway=sin(uTime*(1.8+sp*.15)+p2.x*.4+p2.y*.3+th*6.)*.1*clamp(sp/6.,.2,1.);
+      vB=1.+(.16*wave-.08)*ws;
+      vec3 transformed; vS=0.; vF=0.;
+      if(thatch){
+        float lc=min(lev,max(L,0.)+1.); float hs=.62*${S0}*exp2(lc)*(.8+.4*r6)*clamp((70.-dc)/25.,0.,1.)*wv;
+        if(!grassK&&kind!=2.&&kind!=3.&&kind!=7.&&kind!=9.) kill=true; if(hs<=.001) kill=true;
+        float a=rnd*6.2832; vec2 cv=vec2(vi==1.||vi==2.?1.:-1.,vi>=2.?1.:-1.)*hs; vec2 rc=vec2(cv.x*cos(a)-cv.y*sin(a),cv.x*sin(a)+cv.y*cos(a));
+        vec2 pp=p2+rc; transformed=vec3(pp.x,groundY(pp)+.022+.004*r3,pp.y); vT=.04+.1*r2; col*=.78+.2*r4; hgt=1.;
+      } else {
+        float bw=max(corn?.05+.02*r4:(kind==3.||kind==2.?.006:.0045+.0045*r4),dc*uPx);
+        float ang=rnd*6.2832; vec2 rd=vec2(cos(ang),sin(ang)); vec2 tv=p2-uCamP.xz; vec2 fc=normalize(vec2(-tv.y,tv.x)+1e-4); if(dot(fc,rd)<0.) fc=-fc;
+        rd=normalize(mix(rd,fc,smoothstep(18.,70.,dc)*.85)+1e-4);
+        float t=vi<1.5?0.:(vi<3.5?.5:1.); float sd=(vi==0.||vi==2.)?-.5:((vi==1.||vi==3.)?.5:0.); sd*=1.-t*.55;
+        vec2 lean=(vec2(r0,r1)-.5)*.5;
+        vec2 off=(dir*(bend+sway)*(1.+fl)+lean)*t*t*hgt; float yy=t*hgt*(1.-fl*.75*t);
+        transformed=vec3(p2.x+rd.x*bw*sd+off.x,gy-.03-dc*.0004+yy,p2.y+rd.y*bw*sd+off.y); vT=t;
+        if(grassK){ vS=clamp((col.r-col.g*.8)*6.+.25+.35*r4,0.,1.)*(kind==11.?.5:1.); if(r3<.05) vS=1.3; else if(kind==0.&&r3<.072&&dc<90.) vF=1.+floor(r6*3.); }
+        else if(kind==2.) vS=.15*r4;
+      }
+      if(hgt<=.004) kill=true;
+      vCol=col;`)
       .replace('#include <project_vertex>', 'vec4 mvPosition=viewMatrix*vec4(transformed,1.); gl_Position=projectionMatrix*mvPosition; if(kill) gl_Position=vec4(2.,2.,2.,1.);')
       .replace('#include <worldpos_vertex>', 'vec4 worldPosition=vec4(transformed,1.);');
-    FRAG(sh);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCol; varying float vT,vS,vF,vB;')
+      .replace('#include <map_fragment>', `
+        vec3 gc=vCol; float tip=vT*vT; gc=mix(gc,vec3(.2,.16,.075)*(.9+.2*vCol.g*5.),clamp(vS*tip,0.,1.));
+        if(vS>1.2&&vT>.82) gc=vec3(.13,.095,.05);
+        if(vF>.5&&vT>.9) gc=vF<1.5?vec3(.62,.45,.04):(vF<2.5?vec3(.26,.11,.33):vec3(.7,.68,.6));
+        diffuseColor.rgb=gc*(.55+.7*vT)*vB;`)
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor=1.;').replace('#include <metalnessmap_fragment>', 'float metalnessFactor=0.;')
+      .replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n normal=normalize(mat3(viewMatrix)*vec3(0.,1.,0.)); nonPerturbedNormal=normal;');
   };
-  const PR = Math.ceil(RFAR / P) + 1, MAXP = (2 * PR + 1) ** 2, lods = [];
-  for (let k = 0; k <= KMAX; k++) {
-    const n = CELLS >> k, pos = new Float32Array(n * n * 9 * 3); let o = 0;
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) for (let v = 0; v < 9; v++) { pos[o++] = i; pos[o++] = j; pos[o++] = v; }
-    const gg = new THREE.InstancedBufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    const ia = new THREE.InstancedBufferAttribute(new Float32Array(MAXP * 3), 3); ia.setUsage(THREE.DynamicDrawUsage); gg.setAttribute('iPt', ia); gg.instanceCount = 0;
-    gg.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
-    const m = new THREE.Mesh(gg, fmat); m.frustumCulled = false; m.receiveShadow = true; m.matrixAutoUpdate = false; m.visible = false; group.add(m); lods.push({ m, ia, n: 0 });
+
+  // ================= geometry: one node = 32x32 cells, each 3 blades (5 verts) + thatch card =================
+  const pos = new Float32Array(NC * NC * VPC * 3), idx = new Uint16Array(NC * NC * (BL * 9 + 6)); let o = 0, oi = 0;
+  for (let j = 0; j < NC; j++) for (let i = 0; i < NC; i++) {
+    const v0 = (j * NC + i) * VPC;
+    for (let b = 0; b < BL; b++) { for (let v = 0; v < 5; v++) { pos[o++] = i; pos[o++] = j; pos[o++] = b * 8 + v; } const a = v0 + b * 5; idx.set([a, a + 1, a + 3, a, a + 3, a + 2, a + 2, a + 3, a + 4], oi); oi += 9; }
+    for (let v = 0; v < 4; v++) { pos[o++] = i; pos[o++] = j; pos[o++] = BL * 8 + v; } const a = v0 + BL * 5; idx.set([a, a + 1, a + 2, a, a + 2, a + 3], oi); oi += 6;
   }
-  const fw = new THREE.Vector3();
-  function pickPatches(c) {
-    ctx.camera.getWorldDirection(fw); const fl = Math.hypot(fw.x, fw.z), noCull = fl < .3, fx = fw.x / (fl || 1), fz = fw.z / (fl || 1);
-    const cam = ctx.camera, hv = Math.atan(Math.tan((cam.fov || 70) * Math.PI / 360) * (cam.aspect || 1.78)), cosH = Math.cos(Math.min(Math.PI, hv + .12));
-    u.uPx.value = 2 * Math.tan((cam.fov || 70) * Math.PI / 360) / Math.max(300, (ctx.renderer?.domElement?.height || 900)) * 2.1;
-    for (const l of lods) l.n = 0;
-    const pcx = Math.floor(c.x / P), pcz = Math.floor(c.z / P), D0 = N0, cpx = c.x, cpz = c.z;
-    for (let j = -PR; j <= PR; j++) for (let i = -PR; i <= PR; i++) {
-      const x0 = (pcx + i) * P, z0 = (pcz + j) * P, ddx = Math.max(x0 - cpx, 0, cpx - x0 - P), ddz = Math.max(z0 - cpz, 0, cpz - z0 - P), dmin = Math.hypot(ddx, ddz);
-      if (dmin > RFAR) continue; const ex = Math.max(Math.abs(x0 - cpx), Math.abs(x0 + P - cpx)), ez = Math.max(Math.abs(z0 - cpz), Math.abs(z0 + P - cpz)); if (Math.hypot(ex, ez) < N0) continue;
-      if (!noCull && dmin > 2) { const vx = x0 + P / 2 - cpx, vz = z0 + P / 2 - cpz, vl = Math.hypot(vx, vz), r = P * .71 + 18; if (vl > r && (vx * fx + vz * fz) / vl < Math.cos(Math.min(Math.PI, Math.acos(cosH) + Math.asin(Math.min(1, r / vl))))) continue; }
-      const k = Math.min(KMAX, Math.max(0, Math.floor(Math.log2(Math.max(dmin, D0) / D0)))), L = lods[k], a = L.ia.array, o = L.n * 3; a[o] = (pcx + i) * CELLS; a[o + 1] = (pcz + j) * CELLS; a[o + 2] = k; L.n++;
-    }
-    for (const l of lods) { l.m.geometry.instanceCount = l.n; l.m.visible = l.n > 0; if (l.n) { l.ia.clearUpdateRanges(); l.ia.addUpdateRange(0, l.n * 3); l.ia.needsUpdate = true; } }
+  const MAXN = 6000, gg = new THREE.InstancedBufferGeometry(); gg.setAttribute('position', new THREE.BufferAttribute(pos, 3)); gg.setIndex(new THREE.BufferAttribute(idx, 1));
+  const ia = new THREE.InstancedBufferAttribute(new Float32Array(MAXN * 3), 3); ia.setUsage(THREE.DynamicDrawUsage); gg.setAttribute('iPt', ia); gg.instanceCount = 0; gg.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e9);
+  const mesh = new THREE.Mesh(gg, mat); mesh.frustumCulled = false; mesh.receiveShadow = true; mesh.matrixAutoUpdate = false; mesh.visible = false; group.add(mesh);
+
+  // ================= per-frame node selection (quadtree in the view wedge) =================
+  const fw = new THREE.Vector3(); let nN = 0; const lodCount = new Int32Array(KMAX + 1);
+  let cpx = 0, cpz = 0, fx = 0, fz = 0, noCull = false, cosH = 0, acH = 0;
+  function visit(k, ix, iz) {
+    const size = P0 * 2 ** k, x0 = ix * size, z0 = iz * size, ddx = Math.max(x0 - cpx, 0, cpx - x0 - size), ddz = Math.max(z0 - cpz, 0, cpz - z0 - size), dmin = Math.hypot(ddx, ddz);
+    if (dmin > RFAR) return;
+    if (!noCull && dmin > 1) { const vx = x0 + size / 2 - cpx, vz = z0 + size / 2 - cpz, vl = Math.hypot(vx, vz), r = size * .71 + 3 + Math.min(size, 30); if (vl > r && (vx * fx + vz * fz) / vl < Math.cos(Math.min(Math.PI, acH + Math.asin(Math.min(1, r / vl))))) return; }
+    const want = Math.floor(Math.log2(Math.max(dmin, D0) / D0));
+    if (k === 0 || want >= k) { if (nN < MAXN) { const a = ia.array, oo = nN * 3, s = NC * 2 ** k; a[oo] = ix * s; a[oo + 1] = iz * s; a[oo + 2] = k; nN++; lodCount[k]++; } return; }
+    visit(k - 1, ix * 2, iz * 2); visit(k - 1, ix * 2 + 1, iz * 2); visit(k - 1, ix * 2, iz * 2 + 1); visit(k - 1, ix * 2 + 1, iz * 2 + 1);
+  }
+  function pick(c) {
+    const cam = ctx.camera; cam.getWorldDirection(fw); const fl = Math.hypot(fw.x, fw.z); noCull = fl < .3; fx = fw.x / (fl || 1); fz = fw.z / (fl || 1);
+    const hv = Math.atan(Math.tan((cam.fov || 70) * Math.PI / 360) * (cam.aspect || 1.78)); cosH = Math.cos(Math.min(Math.PI, hv + .1)); acH = Math.acos(cosH);
+    u.uPx.value = 2 * Math.tan((cam.fov || 70) * Math.PI / 360) / Math.max(300, (ctx.renderer?.domElement?.height || 900)) * 1.15;
+    cpx = c.x; cpz = c.z; nN = 0; lodCount.fill(0);
+    const RS = P0 * 2 ** KMAX, rx = Math.floor(c.x / RS), rz = Math.floor(c.z / RS), rr = Math.ceil(RFAR / RS);
+    for (let j = -rr; j <= rr; j++) for (let i = -rr; i <= rr; i++) visit(KMAX, rx + i, rz + j);
+    gg.instanceCount = nN; mesh.visible = nN > 0 && LV.every((l) => l.ready); if (nN) { ia.clearUpdateRanges(); ia.addUpdateRange(0, nN * 3); ia.needsUpdate = true; }
   }
 
-  let lx = 1e9, lz = 1e9; const t0c = performance.now(); let tReady = 0;
-  group.userData.stats = () => ({ grassPatches: lods.map((l) => l.n), grassJobs: queue.length + jobs.size, grassReady: LV.map((l) => l.ready), bakeMs: tReady, workMs: Math.round(workMs), nW: wk.length, tiles: tiles.size, mainThread });
+  const t0c = performance.now(); let tReady = 0;
+  group.userData.stats = () => ({ nodes: nN, perLod: [...lodCount], verts: nN * NC * NC * VPC, grassJobs: queue.length + jobs.size, grassReady: LV.map((l) => l.ready), bakeMs: tReady, workMs: Math.round(workMs), nW: wk.length, mainThread });
   return { group, update() {
     if (!tReady && LV.every((l) => l.ready)) tReady = Math.round(performance.now() - t0c);
-    const c = ctx.camera.position, cx = Math.floor(c.x / T), cz = Math.floor(c.z / T), rr = Math.ceil(RAD / T); camP.copy(c);
+    const c = ctx.camera.position; camP.copy(c);
     for (const l of LV) { if (l.busy) continue; const nx = Math.floor(c.x / l.c) - l.N / 2, nz = Math.floor(c.z / l.c) - l.N / 2; if (!l.ready || Math.abs(nx - l.ox) >= l.hs || Math.abs(nz - l.oz) >= l.hs) shift(l, nx, nz, c.x, c.z); }
     pumpJobs();
     if (c.y - S.heightAt(c.x, c.z) > 120) { group.visible = false; return; } group.visible = true;
-    pickPatches(c);
-    if (cx !== lx || cz !== lz) { lx = cx; lz = cz; for (const [k, m] of tiles) { const tx = Math.floor(k / 65536) - 32768, tz = (k % 65536) - 32768; if (Math.hypot((tx + .5) * T - c.x, (tz + .5) * T - c.z) > RAD + T) { m.visible = false; free.push(m); tiles.delete(k); } } need = []; for (let j = -rr; j <= rr; j++) for (let i = -rr; i <= rr; i++) { const tx = cx + i, tz = cz + j, k = (tx + 32768) * 65536 + tz + 32768; if (!tiles.has(k) && Math.hypot((tx + .5) * T - c.x, (tz + .5) * T - c.z) < RAD + T * .7) need.push([Math.hypot(i, j), tx, tz, k]); } need.sort((a, b) => b[0] - a[0]); }
-    const t0 = performance.now(); while (need.length && performance.now() - t0 < 1.6) { const [, tx, tz, k] = need.pop(); tiles.set(k, gen(tx, tz)); }
-  }, idle: () => need.length === 0 && LV.every((l) => l.ready && !l.busy),
-  stats: () => ({ grassPatches: lods.map((l) => l.n), grassJobs: queue.length + jobs.size, grassReady: LV.map((l) => l.ready) }) };
+    pick(c);
+  }, idle: () => LV.every((l) => l.ready && !l.busy), stats: () => group.userData.stats() };
 }

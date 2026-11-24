@@ -24,6 +24,8 @@ export function drawMap(S, W = 2048) {
   g.strokeStyle = 'rgba(70,120,150,.85)'; g.lineCap = g.lineJoin = 'round';
   for (const r of D.rivers) { g.lineWidth = Math.max(.8, r.width / 45); g.beginPath(); for (let i = 0; i < r.pts.length; i += 4) i ? g.lineTo(X(r.pts[i]), Z(r.pts[i + 1])) : g.moveTo(X(r.pts[i]), Z(r.pts[i + 1])); g.stroke(); }
   // roads
+  // minor roads first, thin and faint: gravel section roads, then town streets
+  for (const k of [3, 2]) { g.strokeStyle = k === 3 ? 'rgba(150,138,112,.22)' : 'rgba(170,160,140,.32)'; g.lineWidth = k === 3 ? .45 : .55; g.beginPath(); for (const r of D.roads) { if (r.k !== k) continue; for (let i = 0; i < r.pts.length; i += 2) i ? g.lineTo(X(r.pts[i]), Z(r.pts[i + 1])) : g.moveTo(X(r.pts[i]), Z(r.pts[i + 1])); } g.stroke(); }
   for (const k of [1, 0]) { for (const r of D.roads) { if (r.k !== k) continue; g.strokeStyle = k ? 'rgba(150,140,120,.55)' : 'rgba(230,170,70,.9)'; g.lineWidth = k ? .8 : 1.6; g.beginPath(); for (let i = 0; i < r.pts.length; i += 6) i ? g.lineTo(X(r.pts[i]), Z(r.pts[i + 1])) : g.moveTo(X(r.pts[i]), Z(r.pts[i + 1])); g.lineTo(X(r.pts[r.pts.length - 2]), Z(r.pts[r.pts.length - 1])); g.stroke(); } }
   // cities + labels without overlap (biggest first)
   const boxes = [], hit = (a, q) => boxes.some((b) => b[4] !== q && a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1]);

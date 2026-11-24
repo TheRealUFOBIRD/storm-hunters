@@ -1,16 +1,41 @@
-// Grass data baking, shared by the main thread (near blades) and the grass worker (far clipmap rects). No three.js.
+// Grass data baking for the grass clipmaps (runs in the grass worker; main-thread fallback). No three.js.
 // Clipmap texel (I,J) of a level with spacing c samples the world at (I*c, J*c):
-//   H  (Float32 x2): ground height (terrainAt, matches the terrain mesh), blade height in m (0 = no grass)
-//   C  (Uint8 x4)  : sqrt-encoded linear colour rgb, density 0..255
+//   H (Float32 x2): ground height (terrainAt, matches the terrain mesh), base blade height in m (0 = no grass)
+//   C (Uint8 x4)  : sqrt-encoded linear colour rgb, a = kind*16 + density(0..15)
+// kinds: 0 prairie / natural, 1 pasture, 2 green wheat, 3 gold wheat, 4 corn (rows along z), 5 soy, 7 hay, 9 stubble,
+//        10 corn (rows along x), 11 mown verge
 import { hash2 } from '../core/rng.js';
 import { makeSampler, OX, OZ, CELL, GX, GZ } from './sampler.js';
 
-// blade colour / height for a crop class (same palette the near blades use)
-export function colFor(crop, b, x, z, o) {
-  const n = hash2(x * 3 | 0, z * 3 | 0, 5); let h = .32 + b.forest * .1, r, gg, bb; const dry = Math.min(1, b.arid * 1.3 + .15);
-  if (crop === 2) { r = .09; gg = .16; bb = .04; h = .6; } else if (crop === 3 || crop === 9) { r = .3; gg = .22; bb = .085; h = crop === 3 ? .85 : .2; } else if (crop === 4) { r = .07; gg = .14; bb = .035; h = 2.0; } else if (crop === 5) { r = .08; gg = .15; bb = .04; h = .5; } else if (crop === 7) { r = .17; gg = .19; bb = .07; h = .35; }
-  else { const dd = dry * (.5 + .5 * hash2(x * .2 | 0, z * .2 | 0, 6)); r = .055 + .12 * dd; gg = .085 + .06 * dd; bb = .025 + .04 * dd; h = .22 + .22 * (1 - b.arid) * hash2(x | 0, z | 0, 8); }
-  const k = .8 + .4 * n; o[0] = r * k; o[1] = gg * k; o[2] = bb * k; o[3] = h;
+const sm = (t) => t * t * (3 - 2 * t);
+// smooth value noise 0..1 on an s-metre grid
+export function vnoise(x, z, s, seed) {
+  const u = x / s, v = z / s, i = Math.floor(u), j = Math.floor(v), a = sm(u - i), b = sm(v - j);
+  const h00 = hash2(i, j, seed), h10 = hash2(i + 1, j, seed), h01 = hash2(i, j + 1, seed), h11 = hash2(i + 1, j + 1, seed);
+  return (h00 + (h10 - h00) * a) * (1 - b) + (h01 + (h11 - h01) * a) * b;
+}
+
+// blade colour (linear rgb) and base height (m) for a kind; o = [r,g,b,h]
+export function colFor(kind, b, x, z, o) {
+  const p1 = vnoise(x, z, 7, 11), p2 = vnoise(x, z, 23, 12), p3 = vnoise(x, z, 2.3, 13);
+  const dry = Math.min(1, Math.max(0, b.arid * 1.25 + .1 + (p2 - .5) * .5 - b.forest * .3));
+  let r, g, bb, h;
+  if (kind === 2) { r = .085; g = .15; bb = .04; h = .62; }
+  else if (kind === 3) { r = .30; g = .22; bb = .085; h = .85; }
+  else if (kind === 9) { r = .27; g = .2; bb = .08; h = .18; }
+  else if (kind === 4 || kind === 10) { r = .07; g = .14; bb = .035; h = 2.0; }
+  else if (kind === 5) { r = .075; g = .14; bb = .04; h = .45; }
+  else if (kind === 7) { r = .16; g = .18; bb = .07; h = .32; }
+  else {
+    // grassland: mixed greens with straw patches
+    const straw = Math.min(1, dry * (.55 + .6 * p1)), green = 1 - straw;
+    r = .055 * green + .19 * straw; g = .10 * green + .16 * straw; bb = .028 * green + .07 * straw;
+    const lush = .85 + .3 * p3; r *= lush; g *= lush; bb *= lush;
+    if (kind === 11) h = .16 + .14 * p1;                    // mown verge 15-30 cm (x blade var)
+    else if (kind === 1) h = .17 + .2 * p1 * (1 - b.arid * .5); // pasture 15-45 cm
+    else h = .3 + .28 * p1 * (1 - b.arid * .6) + .08 * p2;      // prairie 30-70 cm
+  }
+  const k = .88 + .24 * p3; o[0] = r * k; o[1] = g * k; o[2] = bb * k; o[3] = h;
 }
 
 const tmp = [0, 0, 0, 0];
@@ -21,17 +46,20 @@ export function bakeRect(S, c, I0, J0, w, h, H, C) {
     const x = (I0 + i) * c, z = (J0 + j) * c, k = j * w + i, y = S.terrainAt(x, z);
     H[k * 2] = y; H[k * 2 + 1] = 0; C[k * 4] = C[k * 4 + 1] = C[k * 4 + 2] = C[k * 4 + 3] = 0;
     // conservative road / river clearance (blades are jittered up to ~c/2 off the sample)
-    const m = c * .5; if (O.eMaj < 1.4 + m || O.eStr < 3 + m || O.eGrv < .9 + m || O.deck || O.eRiv < 2.5 + m) continue;
+    const m = c * .5; if (O.eMaj < .9 + m || O.eStr < 2.6 + m || O.eGrv < .5 + m || O.deck || O.eRiv < 2.2 + m) continue;
     const edgeRoad = O.eMaj < 15 || O.eStr < 9;
-    const f = S.fieldAt(x, z); if (f.crop === 6 || f.crop === 8 || f.yard < 1 + m) continue;
-    const crop = edgeRoad || f.edge < 0 ? 0 : f.crop, b = S.bio(x, z); let d = 1;
-    if (b.urban > .5) d *= .3; if (b.arid > .8) d *= .3;
+    const f = S.fieldAt(x, z); if (f.crop === 6 || f.crop === 8 || f.yard < .5 + m) continue;
+    const crop = edgeRoad || f.edge < 0 ? (edgeRoad ? 11 : 0) : f.crop, b = S.bio(x, z); let d = 1;
+    const kind = crop === 4 && f.dir ? 10 : crop;
+    if (b.urban > .5) d *= .35; if (b.arid > .8) d *= .3;
+    if (kind === 4 || kind === 10) d *= .5; else if (kind === 5) d *= .5; else if (kind === 9) d *= .7;
     if (O.eRiv < 7 && O.rivY > y - .05) continue;
     { // coast / lake test only where the macro grid says water is possible (waterLevelAt re-runs groundAt: expensive)
       let gu = Math.round((x - OX) / CELL), gv = Math.round((z - OZ) / CELL); gu = gu < 0 ? 0 : gu > GX - 1 ? GX - 1 : gu; gv = gv < 0 ? 0 : gv > GZ - 1 ? GZ - 1 : gv; const gk = gv * GX + gu, D = S.data;
       if ((D.coast[gk] < 450 || (D.lakeI && D.lakeI[gk] !== 255)) && S.waterLevelAt(x, z) > y - .05) continue; }
-    colFor(crop, b, x, z, tmp);
-    H[k * 2 + 1] = tmp[3]; C[k * 4] = Math.min(255, Math.sqrt(tmp[0]) * 255 + .5); C[k * 4 + 1] = Math.min(255, Math.sqrt(tmp[1]) * 255 + .5); C[k * 4 + 2] = Math.min(255, Math.sqrt(tmp[2]) * 255 + .5); C[k * 4 + 3] = d * 255;
+    colFor(kind, b, x, z, tmp);
+    H[k * 2 + 1] = tmp[3]; C[k * 4] = Math.min(255, Math.sqrt(tmp[0]) * 255 + .5); C[k * 4 + 1] = Math.min(255, Math.sqrt(tmp[1]) * 255 + .5); C[k * 4 + 2] = Math.min(255, Math.sqrt(tmp[2]) * 255 + .5);
+    C[k * 4 + 3] = kind * 16 + Math.max(1, Math.round(d * 15));
   }
 }
 
