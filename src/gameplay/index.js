@@ -47,7 +47,7 @@ export async function create(ctx) {
     createProbeVisual: () => probeModel(), createDroneVisual: () => droneModel(), syncViewModel: (dt) => tools.syncView(dt), trackCone, warningPolygon, approach,
     setWaypoint(x, z, label = 'Waypoint', o = {}) { let route = null; const p = pos(); try { route = ctx.world.route?.(p.x, p.z, x, z) || null; } catch (e) { console.error('[route]', e); } G.waypoint = { x, z, label, kind: o.kind || 'user', route, dist: 0, rem: 0, turn: 0, turnDist: 0, eta: 0 }; wpT = 4; updateWaypoint(); if (!o.silent) ctx.events.emit('waypoint:set', G.waypoint); return G.waypoint; },
     clearWaypoint() { G.waypoint = null; ctx.events.emit('waypoint:clear'); },
-    radio(text, who = 'Marlow', now = false) { if (queue.length > 4 && !now) return; const q = { text, who }; if (now) queue.unshift(q); else queue.push(q); },
+    radio(text, who = 'Marlow', now = false) { if (!ctx.settings.get('radio')) return; /* dispatcher chatter is off unless enabled in settings */ if (queue.length > 4 && !now) return; const q = { text, who }; if (now) queue.unshift(q); else queue.push(q); },
     say(kind, data = {}, gap = 45) { const t = ctx.time.real; if (t - (lastLine[kind] ?? -1e9) < gap) return; lastLine[kind] = t; G.radio(rnd.pick(MARLOW[kind]).replace('{s}', data.s || 'the storm')); },
     // ---- services
     serviceInfo() {

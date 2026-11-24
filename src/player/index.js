@@ -137,16 +137,18 @@ export async function create(ctx) {
         if (!C.init) chaseYaw = hh; chaseYaw += wrapAngle(hh - chaseYaw) * (1 - Math.exp(-dt * (b.airborne ? 1.2 : 4.2)));
         // chaseYaw is a compass heading (clockwise = right) while P.look.yaw is an Euler yaw (positive = left, as used by
         // the cockpit/hood view), so it is subtracted here: mouse/stick right swings the view right in every camera.
-        const yaw = chaseYaw - P.look.yaw + lb, dist = Math.max(4.6, s.L * 0.95 + 1.6) + clamp(sp / 40) * 1.2, h = (s.tall || s.H) * 0.62 + 1.15, pitch = 0.12 + P.look.pitch * -1;
+        const yaw = chaseYaw - P.look.yaw + lb, dist = Math.max(4.6, s.L * 0.95 + 1.6), h = (s.tall || s.H) * 0.62 + 1.15, pitch = 0.12 + P.look.pitch * -1;
         tgt.copy(b.rp).add(V2.set(0, (s.tall || s.H) * 0.55 - s.cgY + 0.35, 0)); chaseVel.lerp(b.v, 1 - Math.exp(-dt * 6));
-        want.set(Math.sin(yaw) * Math.cos(pitch) * -dist, h - 0.8 + Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist).add(tgt).addScaledVector(chaseVel, -0.035);
+        want.set(Math.sin(yaw) * Math.cos(pitch) * -dist, h - 0.8 + Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist).add(tgt);
         const gy = ctx.world.heightAt(want.x, want.z) + 0.45; if (want.y < gy) want.y = gy; // terrain collision
         if (ctx.world.raycastTerrain) { V3.copy(want).sub(tgt); const L = V3.length(); V3.normalize(); const hit = ctx.world.raycastTerrain(tgt, V3, L); if (hit > 0 && hit < L) { want.copy(tgt).addScaledVector(V3, Math.max(s.L * 0.55 + 1.3, hit - 0.4)); const gy2 = ctx.world.heightAt(want.x, want.z) + 0.45; if (want.y < gy2) want.y = gy2; } } // never pull the arm inside the car body
-        if (!C.init) C.pos.copy(want); C.pos.lerp(want, 1 - Math.exp(-dt * 12)); M4.lookAt(C.pos, tgt, UP); wq.setFromRotationMatrix(M4);
+        // smooth the arm offset relative to the car, not the absolute position: a world-space lerp trails the car by
+        // speed/rate (~3 m at 145 km/h), so the camera used to drift away the faster you drove
+        V3.copy(want).sub(tgt); if (!C.init || !C.off) C.off = V3.clone(); C.off.lerp(V3, 1 - Math.exp(-dt * 12)); C.pos.copy(tgt).add(C.off); M4.lookAt(C.pos, tgt, UP); wq.setFromRotationMatrix(M4);
         const roll = clamp(-b.accLocal.x * 0.004, -0.06, 0.06) + clamp(b.windLoad * 0.03, 0, 0.05) * Math.sin(ctx.time.now * 6); wq.multiply(Q2.setFromAxisAngle(V2.set(0, 0, 1), roll));
         fovAdd = clamp((sp - 8) / 45) * 11;
       } else {
-        const m = mode === 'cockpit' ? v.mounts.driver : null; if (m) { m.updateMatrixWorld(); m.getWorldPosition(want); } else { want.set(0, (s.tall || s.H) * 0.86 - s.cgY + 0.12, -s.L * 0.18 + s.cgF).applyQuaternion(b.rq).add(b.rp); }
+        const m = mode === 'cockpit' ? v.mounts.driver : null; if (m) { m.updateMatrixWorld(); m.getWorldPosition(want); want.add(V2.set(0, 0.12, 0).applyQuaternion(b.rq)); } // eye 12 cm higher than the seat mount else { want.set(0, (s.tall || s.H) * 0.86 - s.cgY + 0.12, -s.L * 0.18 + s.cgF).applyQuaternion(b.rq).add(b.rp); }
         // g-force lean & head bob
         gLean.x = damp(gLean.x, clamp(-b.accLocal.x * 0.006, -0.06, 0.06), 6, dt); gLean.y = damp(gLean.y, clamp(b.accLocal.z * 0.004, -0.05, 0.05), 6, dt); V2.set(gLean.x, Math.sin(ctx.time.now * 13) * clamp(sp / 30) * 0.004 + clamp(-b.accLocal.y * 0.002, -0.03, 0.03), gLean.y).applyQuaternion(b.rq); want.add(V2);
         C.pos.copy(want); E.set(P.look.pitch - 0.04, P.look.yaw + lb, 0, 'YXZ'); wq.copy(b.rq).multiply(Q.setFromEuler(E)); fovAdd = clamp((sp - 10) / 50) * 6;

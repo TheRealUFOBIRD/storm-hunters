@@ -1,4 +1,4 @@
-const DEF = { quality: 'auto', resolution: 1, fov: 72, shadows: true, motionBlur: false, filmGrain: true, invertY: false, mouseSens: 1, units: 'imperial', master: 0.8, sfx: 1, music: 0.5, voice: 0.8, showFps: false, name: '', dynamicRes: true, cameraShake: 1, hints: true };
+const DEF = { quality: 'auto', resolution: 1, fov: 72, shadows: true, motionBlur: false, filmGrain: true, invertY: false, mouseSens: 1, units: 'imperial', master: 0.8, sfx: 1, music: 0.5, voice: 0.8, showFps: false, name: '', dynamicRes: true, cameraShake: 1, hints: true, radio: false };
 export const PRESETS = {
   low:    { id: 'low',    volScale: 0.25, volSteps: 48,  lightSteps: 3, shadowSize: 1024, cascades: 1, grass: 0.25, trees: 0.4, viewDist: 9000,  particles: 0.35, pixelRatio: 0.75, ssao: false, bloom: true, taa: false },
   medium: { id: 'medium', volScale: 0.33, volSteps: 72,  lightSteps: 4, shadowSize: 1536, cascades: 2, grass: 0.5,  trees: 0.7, viewDist: 14000, particles: 0.6,  pixelRatio: 1,    ssao: true,  bloom: true, taa: true },
