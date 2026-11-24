@@ -84,6 +84,27 @@ function enterMenu() {
   try { ctx.ui.openScreen('main'); } catch (e) { console.error('[menu]', e?.stack || e); }
   return { x: bx, z: bz };
 }
+// ---- co-op spawning: never inside another player ----
+function waitPeers(s) { const t0 = performance.now(); return new Promise((r) => { const t = () => { const ps = [...(ctx.net.peers?.values?.() || [])]; if ((ps.length && ps.every((p) => p.pos && (p.pos.x || p.pos.z))) || performance.now() - t0 > s * 1000) r(); else setTimeout(t, 100); }; t(); }); }
+function freeSpawn(sp) {
+  const W = ctx.world, occ = [];
+  for (const v of ctx.vehicles.list || []) occ.push(v.pos);
+  for (const c of ctx.net?.remoteVehicles || []) if (c?.pos) occ.push(c.pos);
+  for (const p of ctx.net?.peers?.values?.() || []) if (p?.pos) occ.push(p.pos);
+  // each player gets its own lane slot (from its network id), so two players joining at the same moment can't pick the same spot
+  let slot = 0; const id = String(ctx.net?.id || ''); if (ctx.net?.role === 'client' && id) { let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0; slot = 1 + (h % 7); }
+  const h = sp.heading || 0, dx = Math.sin(h), dz = -Math.cos(h), r0 = W.roads?.nearest?.(sp.x, sp.z);
+  const lat = r0 ? (sp.x - r0.x) * -r0.dirZ + (sp.z - r0.z) * r0.dirX : 0; // keep the start lane's side of the road
+  const free = (x, z) => occ.every((p) => Math.hypot(p.x - x, p.z - z) > 10);
+  for (let k = 0; k < 40; k++) {
+    const d = slot * 16 + (k === 0 ? 0 : (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 16);
+    let x = sp.x + dx * d, z = sp.z + dz * d, hd = h;
+    const r = W.roads?.nearest?.(x, z);
+    if (r && r.dist < 25) { x = r.x - r.dirZ * lat; z = r.z + r.dirX * lat; const rh = Math.atan2(r.dirX, -r.dirZ); hd = Math.cos(rh - h) >= 0 ? rh : rh + Math.PI; }
+    if (free(x, z)) return { x, z, heading: hd };
+  }
+  return sp;
+}
 function quitGame() { ctx.net.leave?.(); if (ctx.player.vehicle) ctx.player.exit?.(); ctx.vehicles.clear?.(); enterMenu(); }
 async function startGame(o) {
   if (ctx._starting) return; ctx._starting = true;
@@ -94,7 +115,9 @@ async function startGame(o) {
     if (o.mode === 'host') { overlay.set('Opening the room', 5); await ctx.net.host?.(o.name, o.room); } else if (o.mode === 'join') { overlay.set('Joining the room', 5); await ctx.net.join?.(o.room, o.name); }
     if (ctx.menuStorm && o.mode !== 'join' && !o.joined && ctx.net.role !== 'client') ctx.storms.clear?.();
     ctx.menuStorm = null;
-    const sp = ctx.world.spawnPoint?.(o.city) || { x: 0, z: 0, heading: 0 };
+    if (o.mode === 'join' || o.joined || ctx.net.role === 'client') { overlay.set('Finding the team', 8); await waitPeers(2.5); }
+    const base = (ctx.net.role === 'client' && ctx.net.hostSpawn) || ctx.world.spawnPoint?.(o.city) || { x: 0, z: 0, heading: 0 };
+    const sp = freeSpawn(base);
     // park the camera at the start point so streaming, culling and compiles all happen for the real view
     const W = ctx.world; ctx.player.cameraOverride = (c) => { c.position.set(sp.x, W.heightAt(sp.x, sp.z) + 3, sp.z); c.rotation.set(-0.05, -(sp.heading || 0), 0, 'YXZ'); };
     await loadArea(sp.x, sp.z, 10, 75, 'Loading ' + (o.city || 'the start area'), 25);
