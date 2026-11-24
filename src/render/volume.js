@@ -381,7 +381,7 @@ void main(){
   float ds=abs(hd.y-md)/max(min(hd.y,md),1.); float dis=smoothstep(.1,.4,ds)*step(min(hd.y,md),59000.);
   vec2 vel=(puv-uv)*uRes;
   // camera motion is reprojected exactly (rotation) or at the cloud depth, so no velocity-based history rejection
-  float a=uAlpha*clamp(conf,.3,2.); a=mix(a,max(a,.12),smoothstep(.1,.5,clampAmt)); a=max(a,mov*.09);
+  float a=uAlpha*clamp(conf,.3,2.); a=mix(a,max(a,.12),smoothstep(.1,.5,clampAmt)); a=max(a,mov*.09); a=1.-pow(1.-clamp(a,0.,1.),clamp(uDt,.002,.1)*60.); // per second, not per frame
   a=mix(a,.85,dis);
   vec4 r=mix(hc,cur,a); o0=vec4(dec(toR(r.rgb)),sat(r.a)); o1=vec4(cdep,md,0.,1.);
 }`;

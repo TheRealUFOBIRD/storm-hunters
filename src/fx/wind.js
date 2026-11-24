@@ -49,7 +49,7 @@ export function createWindFx(ctx, soft, ground) {
     update(dt, wind, cam, px, agl) {
       const sp = Math.hypot(wind.x, wind.z), wet = G.uWetness.value;
       if ((bT -= dt) < 0) { bT = 0.7; const b = ctx.world?.biomeAt?.(cam.x, cam.z), s = ctx.world?.surfaceAt?.(cam.x, cam.z), L = LITTER[b?.id] || LITTER.plains; cA.setRGB(...L[0]); cB.setRGB(...L[1]); bits.u.uLeaf.value = LEAF[b?.id] ?? 0.3; const d = b?.dustColor || [0.42, 0.3, 0.2]; cD.setRGB(d[0], d[1], d[2]); dusty = (b?.id === 'desert' ? 1 : b?.id === 'plains' || b?.id === 'wheat' ? 0.75 : b?.id === 'cornbelt' ? 0.6 : 0.3) * (s?.type === 'water' ? 0 : 1); }
-      bits.u.uColA.value.lerp(cA, 0.05); bits.u.uColB.value.lerp(cB, 0.05); dust.u.uCol.value.lerp(cD, 0.05); const low = 1 - smoothstep(8, 30, agl);
+      const kc = 1 - Math.pow(0.95, Math.min(dt, 0.1) * 60); bits.u.uColA.value.lerp(cA, kc); bits.u.uColB.value.lerp(cB, kc); dust.u.uCol.value.lerp(cD, kc); const low = 1 - smoothstep(8, 30, agl);
       for (const L of [bits, dust]) { const k = L === bits ? 0.72 : 0.85, B = L.u.uBox.value; L.off.x = md(L.off.x + wind.x * k * dt, B.x); L.off.z = md(L.off.z + wind.z * k * dt, B.z); L.u.uShift.value.set(md(L.off.x - cam.x, B.x), 0, md(L.off.z - cam.z, B.z)); L.u.uPx.value = px; L.u.uWindV.value.set(wind.x, 0, wind.z); }
       const db = smoothstep(8, 34, sp) * 0.95 * low; bits.mesh.visible = db > 0.005; bits.u.uDens.value = db; bits.g.instanceCount = bits.n;
       const dd = smoothstep(12, 34, sp) * dusty * (1 - 0.92 * clamp(wet * 1.6)) * low; dust.mesh.visible = dd > 0.01; dust.u.uDens.value = dd * 0.55;

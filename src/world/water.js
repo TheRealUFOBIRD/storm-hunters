@@ -402,7 +402,7 @@ export function createWater(ctx, S, shared) {
   function update() {
     const c = ctx.camera.position; ocean.position.set(Math.round(c.x / 2) * 2, 0, Math.round(c.z / 2) * 2); ocean.visible = S.coastAt(c.x, c.z) < 20000 + Math.max(0, c.y - S.heightAt(c.x, c.z)) * 25;
     // smoothed local wind; strengthens with gusts
-    const gw = G.uWind.value, gust = G.uGust?.value || 0; wind.lerp(gw, .02); const ws = wind.length(); wsS += (ws * (1 + gust * .35) - wsS) * .02;
+    const gw = G.uWind.value, gust = G.uGust?.value || 0; const kw = 1 - Math.pow(.98, Math.min(ctx.time?.dt || 1 / 60, .1) * 60); wind.lerp(gw, kw); const ws = wind.length(); wsS += (ws * (1 + gust * .35) - wsS) * kw;
     u.uWind.value.copy(wind); if (ws > .05) u.uWindDir.value.set(wind.x / ws, wind.y / ws);
     { const d = Math.min(ctx.time?.dt || 0, .1), wd = u.uWindDir.value, k = .6 + .4 * Math.min(1, wsS / 12); u.uDrift.value.x += wd.x * d * k; u.uDrift.value.y += wd.y * d * k; }
     // Cox-Munk-like slope variance split over the 4 layer groups (big -> small)

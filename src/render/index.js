@@ -181,7 +181,7 @@ export async function create(ctx) {
     // ---- composite ----
     const s = post.skyU; s.uTime.value = now; s.uNight.value = atm.night; s.uDrift.value.set(now * 9, now * -3); s.uCirrus.value = 0.35 + 0.4 * cu;
     post.composite(sceneRT.texture, depth, vol, q.ssao);
-    const ctex = q.taa ? post.taa(depth, vol, prevVP, j[0], j[1]) : post.comp.texture;
+    post.dt = dt; const ctex = q.taa ? post.taa(depth, vol, prevVP, j[0], j[1]) : post.comp.texture;
     post.toHdr(ctex, depth);
     // ---- transparents + view models ----
     renderer.setRenderTarget(post.hdr); renderer.autoClear = false;

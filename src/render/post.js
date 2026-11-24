@@ -60,7 +60,7 @@ void main(){
   o=vec4(max(c,vec3(0.)),1.);
 }`;
 const TAA = HEAD + DEPTH_GLSL + /* glsl */`
-in vec2 vUv; out vec4 o; uniform sampler2D uCur,uHist,uDepth,uVolD,uVol; uniform vec4 uDepthK; uniform vec2 uRes,uJit; uniform mat4 uInvVP,uPrevVP; uniform vec3 uCam,uFwd; uniform float uReset;
+in vec2 vUv; out vec4 o; uniform sampler2D uCur,uHist,uDepth,uVolD,uVol; uniform vec4 uDepthK; uniform vec2 uRes,uJit; uniform mat4 uInvVP,uPrevVP; uniform vec3 uCam,uFwd; uniform float uReset,uDt;
 vec3 toY(vec3 c){ return vec3(dot(c,vec3(.25,.5,.25)),dot(c,vec3(.5,0.,-.5)),dot(c,vec3(-.25,.5,-.25))); } vec3 toR(vec3 c){ float t=c.x-c.z; return vec3(t+c.y,c.x+c.z,t-c.y); }
 vec3 tm(vec3 c){ return c/(1.+lum(c)); } vec3 itm(vec3 c){ return c/max(1.-lum(c),1e-3); }
 vec3 hist(vec2 uv){ vec2 p=uv*uRes,c=floor(p-.5)+.5,f=p-c; vec2 w0=f*(-.5+f*(1.-.5*f)),w1=1.+f*f*(-2.5+1.5*f),w2=f*(.5+f*(2.-1.5*f)),w3=f*f*(-.5+.5*f); vec2 w12=w1+w2,p12=(c+w2/w12)/uRes,p0=(c-1.)/uRes,p3=(c+2.)/uRes; vec3 s=vec3(0.); float w=0.,k;
@@ -75,7 +75,7 @@ void main(){
   vec4 pc=uPrevVP*vec4(uCam+rd*d,1.); vec2 uv=pc.xy/pc.w*.5+.5;
   if(uReset>.5||pc.w<=0.||any(lessThan(uv,vec2(0.)))||any(greaterThan(uv,vec2(1.)))){ o=vec4(texelFetch(uCur,ip,0).rgb,1.); return; }
   vec3 h=toY(hist(uv)); float g=1.1; vec3 lo=max(m1-g*sd,mn),hi=min(m1+g*sd,mxc); vec3 c=.5*(lo+hi),e=.5*(hi-lo)+1e-4; vec3 v=h-c; float k=max(max(abs(v.x/e.x),abs(v.y/e.y)),abs(v.z/e.z)); if(k>1.) h=c+v/k;
-  vec2 vel=(uv-vUv)*uRes; float a=mix(.085,.2,sat(length(vel)*.5)); // sub-pixel motion resamples the history every frame (low-pass): refresh faster while moving float lc=cur.x,lh=h.x; float dif=abs(lc-lh)/max(max(lc,lh),.15); a*=mix(1.,.6,sat(1.-dif)*.0+.0);
+  vec2 vel=(uv-vUv)*uRes; float a=mix(.085,.2,sat(length(vel)*.5)); a=1.-pow(1.-a,clamp(uDt,.002,.1)*60.); // weights tuned at 60 fps, applied per second: same look at any frame rate // sub-pixel motion resamples the history every frame (low-pass): refresh faster while moving float lc=cur.x,lh=h.x; float dif=abs(lc-lh)/max(max(lc,lh),.15); a*=mix(1.,.6,sat(1.-dif)*.0+.0);
   vec3 r=mix(h,cur,a); o=vec4(itm(max(toR(r),vec3(0.))),1.);
 }`;
 const COPY = HEAD + /* glsl */`in vec2 vUv; out vec4 o; uniform sampler2D uT,uDepth; void main(){ o=textureLod(uT,vUv,0.); gl_FragDepth=textureLod(uDepth,vUv,0.).r; }`;
@@ -143,7 +143,7 @@ export class Post {
     this.mAoB = fsMaterial(AOBLUR, { uT: { value: null }, uDir: { value: V2() } });
     this.mComp = fsMaterial(COMPOSITE, { ...cam, ...sky, uCurVP: s.curVP, uColor: { value: null }, uDepth: { value: null }, uAo: { value: null }, uVol: { value: null }, uVolD: { value: null }, uBlue: { value: s.blue }, uVolRes: { value: V2() }, uAoOn: { value: 1 }, uFrame: { value: 0 }, uFlashSky: { value: new THREE.Vector4() }, uFlashCol: { value: new THREE.Vector3() } });
     // un-jittered inverse: the resolved pixel is un-jittered, so reprojecting through the jittered matrix shifted the history by the jitter every frame (smear)
-    this.mTaa = fsMaterial(TAA, { ...cam, uInvVP: s.invVPu, uCur: { value: null }, uHist: { value: null }, uDepth: { value: null }, uVolD: { value: null }, uVol: { value: null }, uRes: { value: V2() }, uJit: { value: V2() }, uPrevVP: { value: new THREE.Matrix4() }, uReset: { value: 1 } });
+    this.mTaa = fsMaterial(TAA, { uDt: { value: 1 / 60 }, ...cam, uInvVP: s.invVPu, uCur: { value: null }, uHist: { value: null }, uDepth: { value: null }, uVolD: { value: null }, uVol: { value: null }, uRes: { value: V2() }, uJit: { value: V2() }, uPrevVP: { value: new THREE.Matrix4() }, uReset: { value: 1 } });
     this.mCopy = fsMaterial(COPY, { uT: { value: null }, uDepth: { value: null } }, { depthWrite: true });
     this.mBlit = fsMaterial(BLIT, { uT: { value: null } });
     this.mDown = fsMaterial(DOWN, { uT: { value: null }, uPx: { value: V2() }, uFirst: { value: 0 } });
@@ -181,7 +181,7 @@ export class Post {
     const u = this.mComp.uniforms; u.uColor.value = color; u.uDepth.value = depth; u.uAo.value = this.ao0.texture; u.uAoOn.value = aoOn ? 1 : 0; u.uVol.value = vol.out.textures[0]; u.uVolD.value = vol.out.textures[1]; u.uVolRes.value.set(vol.w, vol.h);
     draw(this.r, this.mComp, this.comp);
   }
-  taa(depth, vol, prevVP, jx, jy) {
+  taa(depth, vol, prevVP, jx, jy) { this.mTaa.uniforms.uDt.value = this.dt ?? 1 / 60;
     const u = this.mTaa.uniforms; u.uCur.value = this.comp.texture; u.uHist.value = this.hist0.texture; u.uDepth.value = depth; u.uVolD.value = vol.out.textures[1]; u.uVol.value = vol.out.textures[0]; u.uRes.value.set(this.w, this.h); u.uJit.value.set(jx, jy); u.uPrevVP.value.copy(prevVP); u.uReset.value = this.reset ? 1 : 0; this.reset = false;
     draw(this.r, this.mTaa, this.hist1); const t = this.hist0; this.hist0 = this.hist1; this.hist1 = t; return this.hist0.texture;
   }
