@@ -57,3 +57,14 @@ test('spawn points lie on a driving lane', () => {
   }
   assert.equal(off, 0, `${off} spawn points off the lane`);
 });
+
+test('every road crossing water stays above it (bridge or culvert)', () => {
+  const G = makeSampler({ ...data, roads: null }); let n = 0, bad = [], worst = 1e9;
+  for (const r of data.roads) { const p = r.pts;
+    for (let q = 0; q + 1 < p.length / 2; q++) { const L = Math.hypot(p[q * 2 + 2] - p[q * 2], p[q * 2 + 3] - p[q * 2 + 1]);
+      for (let k = 0; k < L; k += 2) { const f = k / L, x = p[q * 2] + (p[q * 2 + 2] - p[q * 2]) * f, z = p[q * 2 + 1] + (p[q * 2 + 3] - p[q * 2 + 1]) * f, wl = G.waterLevelAt(x, z);
+        if (!(wl > -1e8) || wl < G.groundAt(x, z) - .4) continue; n++; const c = S.heightAt(x, z) - wl; if (c < worst) worst = c;
+        if (c < 1) bad.push(`${r.name}(${r.kind})@${x.toFixed(0)},${z.toFixed(0)} ${c.toFixed(2)}m`); } } }
+  console.log(`water crossings sampled ${n}, min clearance ${worst.toFixed(2)} m, ${bad.length} below 1 m`);
+  assert.ok(n > 100); assert.equal(bad.length, 0, bad.slice(0, 10).join(' '));
+});

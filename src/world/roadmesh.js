@@ -46,12 +46,12 @@ export function createRoadMaterial(ctx, tex, shared, far) {
       } else if(kind<2.5){
         if(au>4.98){ vec4 k=texture(uGA,vec3(p/2.7,${L.concrete}.)),kb=texture(uGN,vec3(p/2.7,${L.concrete}.)); c=k.rgb*k.rgb*(.8+.3*n1); R=kb.b; float j=abs(fract(s/1.5)-.5)*1.5; c*=1.-.4*ln(j,0.,.02,ps)*smoothstep(.2,.02,ps); c*=1.-.35*ln(au,5.06,.12,px); }
         else { trk=smoothstep(.6,.1,abs(abs(au-2.3)-.85)); c*=1.-trk*.08; float nd=abs(fract(s/132.+.5)-.5)*132.; yl=(ln(u,.1,.1,px)+ln(u,-.1,.1,px))*step(9.,nd)*.75; float cw=step(5.6,nd)*step(nd,8.4)*step(.5,fract(u/1.1))*.8; mk=cw*smoothstep(.5,.1,px); float wear=smoothstep(.25,.55,a.a*.5+n0*.6+n1*.2); c=mix(c,vec3(.6),mk*wear*.8); c=mix(c,vec3(.55,.36,.05),yl*wear*.8); float pl=smoothstep(.25,.0,abs(au-4.75)); c*=1.-pl*.25; }
-      } else { vec4 k=texture(uGA,vec3(s/3.1,vWp.y/3.1+u/3.1,${L.concrete}.)); c=k.rgb*k.rgb*(.75+.3*n1); R=.85; }
+      } else { vec4 k=texture(uGA,vec3(s/3.1,vWp.y/3.1+u/3.1,${L.concrete}.)); c=k.rgb*k.rgb*(.75+.3*n1); R=.85; if(kind>3.5) nl=vec3(0.,0.,1.); /* parapets/piers are vertical: the xz-projected asphalt normal map streaked them */ }
       float dm=damageAt(p); c=mix(c,vec3(.13,.09,.06)*(.6+.8*a.a),smoothstep(.2,.7,dm+(n0-.45)*.8)*.75);
       // wet
       float w=uWetness; float hol=smoothstep(.42,.62,n1*.65+n0*.35+trk*.10+smoothstep(1.6,.2,hw-au)*.08); float pud=kind<3.?smoothstep(.45,.95,w*.9+hol*.55-.3)*hol*smoothstep(.25,.55,w):0.; c*=mix(1.,.50,w); R=mix(R,.30,w*.85); nl.xy*=1.-.5*w; c=mix(c,c*.7,pud); R=mix(R,.035,pud); nl.xy*=1.-pud;
       if(uRain>.01&&dist<50.&&w>.2){ vec2 rp=p*3.4; for(int q=0;q<2;q++){ vec2 ic=floor(rp),fc=fract(rp)-.5; float hh=hs2(ic+float(q)*7.); float t=fract(uTime*1.4+hh); vec2 ct=fc-(vec2(hs2(ic+3.1),hs2(ic+9.7))-.5)*.5; float rr=length(ct); float wv=sin((rr-t*.45)*48.)*smoothstep(.085,0.,abs(rr-t*.45))*(1.-t); nl.xy+=ct/(rr+1e-3)*wv*.55*uRain*max(pud,.25*w); rp=rp*1.37+4.7; } }
-      vec3 g=normalize(vWn),T=normalize(vec3(1.,0.,0.)-g*g.x),B=normalize(vec3(0.,0.,1.)-g*g.z); tN=normalize(T*nl.x+B*nl.y+g); tR=clamp(R,.03,1.); diffuseColor.rgb=c; }`)
+      vec3 g=normalize(vWn),T=vec3(1.,0.,0.)-g*g.x,B=vec3(0.,0.,1.)-g*g.z; if(dot(T,T)<1e-4) T=cross(B,g); if(dot(B,B)<1e-4) B=cross(g,T); T=normalize(T); B=normalize(B); /* faces with normal exactly +-x/+-z (parapets on N-S/E-W bridges) gave normalize(0)=NaN -> black */ tN=normalize(T*nl.x+B*nl.y+g); tR=clamp(R,.03,1.); diffuseColor.rgb=c; }`)
       .replace('#include <roughnessmap_fragment>', 'float roughnessFactor=tR;').replace('#include <metalnessmap_fragment>', 'float metalnessFactor=0.;').replace('#include <normal_fragment_maps>', 'normal=normalize(mat3(viewMatrix)*tN);');
   };
   return m;
@@ -62,7 +62,7 @@ export function createRoads(ctx, S, tex, shared) {
   const mat = createRoadMaterial(ctx, tex, shared, false), matFar = createRoadMaterial(ctx, tex, shared, true);
   // sector -> segments
   const cnt = new Int32Array(SGX * SGZ + 1), secOf = new Int32Array(seg.n).fill(-1);
-  for (let i = 0; i < seg.n; i++) { if (roads[seg.R[i]].k > 2) continue; const x = (seg.S[i * 6] + seg.S[i * 6 + 2]) / 2, z = (seg.S[i * 6 + 1] + seg.S[i * 6 + 3]) / 2, a = Math.floor((x - SOX) / SS), b = Math.floor((z - SOZ) / SS); if (a < 0 || b < 0 || a >= SGX || b >= SGZ) continue; secOf[i] = b * SGX + a; cnt[secOf[i] + 1]++; }
+  for (let i = 0; i < seg.n; i++) { if (roads[seg.R[i]].k > 2 && !seg.B[i]) continue; const x = (seg.S[i * 6] + seg.S[i * 6 + 2]) / 2, z = (seg.S[i * 6 + 1] + seg.S[i * 6 + 3]) / 2, a = Math.floor((x - SOX) / SS), b = Math.floor((z - SOZ) / SS); if (a < 0 || b < 0 || a >= SGX || b >= SGZ) continue; secOf[i] = b * SGX + a; cnt[secOf[i] + 1]++; }
   for (let i = 0; i < SGX * SGZ; i++) cnt[i + 1] += cnt[i]; const ref = new Int32Array(cnt[SGX * SGZ]), pos = cnt.slice(); for (let i = 0; i < seg.n; i++) if (secOf[i] >= 0) ref[pos[secOf[i]]++] = i;
   const tan = (r, i, o) => { const p = r.pts, n = p.length / 2, a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let x = p[b * 2] - p[a * 2], z = p[b * 2 + 1] - p[a * 2 + 1]; const l = Math.sqrt(x * x + z * z) || 1; o.x = x / l; o.z = z / l; };
   const T0 = { x: 0, z: 0 }, T1 = { x: 0, z: 0 };
@@ -72,7 +72,7 @@ export function createRoads(ctx, S, tex, shared) {
     const sub = k === 2 ? 4 : 3, base = P.length / 3, L = Math.max(1, s1 - s0), m0 = r.m[q] * L, m1 = r.m[q + 1] * L, sk = k === 2 && r.blk ? 132 / r.blk : 1; // streets: s scaled so intersections fall on the shader's 132 m grid
     for (let t = 0; t <= sub; t++) {
       const f = t / sub, x = ax + (bx - ax) * f, z = az + (bz - az) * f, y = herm(ya, yb, m0, m1, f), dy = (6 * (f * f - f) * (ya - yb) + (3 * f * f - 4 * f + 1) * m0 + (3 * f * f - 2 * f) * m1) / L; let tx = T0.x + (T1.x - T0.x) * f, tz = T0.z + (T1.z - T0.z) * f; const l = Math.sqrt(tx * tx + tz * tz); tx /= l; tz /= l; const s = s0 + (s1 - s0) * f;
-      for (let c = 0; c < m; c++) { const u = xs[c], X = x - tz * u, Z = z + tx * u; P.push(X, y - CROWN * Math.min(Math.abs(u), r.hw) + ys[c], Z); const sl = k < 2 && Math.abs(u) > .1 && Math.abs(u) <= r.hw ? Math.sign(u) * CROWN : 0; NR.push(-tz * sl - tx * dy, 1, tx * sl - tz * dy); A.push(u, s * sk, k, S.otherEdge(X, Z, r.id)); }
+      const dkB = seg.B[i]; for (let c = 0; c < m; c++) { const sk = dkB && Math.abs(xs[c]) > r.hw, u = sk ? Math.sign(xs[c]) * (r.hw + .25) : xs[c], X = x - tz * u, Z = z + tx * u; P.push(X, y - CROWN * Math.min(Math.abs(u), r.hw) + (sk ? .015 : ys[c]), Z); /* decks: no skirt into the parapets */ const sl = k < 2 && Math.abs(u) > .1 && Math.abs(u) <= r.hw ? Math.sign(u) * CROWN : 0; NR.push(-tz * sl - tx * dy, 1, tx * sl - tz * dy); A.push(u, s * sk, k, S.otherEdge(X, Z, r.id)); }
       if (t) for (let c = 0; c + 1 < m; c++) { const b = base + (t - 1) * m + c; IX.push(b, b + 1, b + m, b + 1, b + m + 1, b + m); }
     }
     if (seg.B[i]) bridge(r, ax, az, ya, bx, bz, yb, T0, T1, s0, s1, m0, m1);
