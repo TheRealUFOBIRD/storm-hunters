@@ -98,7 +98,7 @@ export async function create(ctx) {
         // swept detection: lofted by the wind itself
         const gh = ctx.world.heightAt(b.p.x, b.p.z), agl = b.p.y - gh;
         if (!v.swept && b.windSpeed > 38 && agl > 1.6 && b.airTime > 0.35) { v.swept = true; v.sweptT = 0; ctx.events.emit('vehicle:swept', { v }); }
-        if (v.swept) { v.sweptT += dt; if (b.contactN > 0 && b.v.length() < 2 && v.sweptT > 2) { v.swept = false; ctx.events.emit('vehicle:landed', { v }); } }
+        if (v.swept) { v.sweptT += dt; if (v.sweptT > 2 && !b.airborne && (b.v.length() < 4 || v.sweptT > 12)) { v.swept = false; ctx.events.emit('vehicle:landed', { v }); } }
         // lod + visual update
         const d = cam.distanceTo(v.object3d.position); v.visual.setLod(d > 45 ? 1 : 0); v.object3d.visible = d < 2500;
         v.visual.update(dt, { cam, night, rain: ctx.globals?.uRain?.value ?? 0, windX: b.windU[6], windZ: b.windU[8], vel: b.v, dust: 0, wiper: v === act ? Math.max(wet > 0.05 ? wet : 0, ctx.globals?.uRain?.value ?? 0) : 0 });

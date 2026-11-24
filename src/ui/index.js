@@ -86,7 +86,7 @@ export async function create(ctx) {
   const E = ctx.events;
   E.on('game:started', (o) => { waitingStart = false; ui.ready = true; ui.forceClose(); ui.capture(); hud.refresh?.(); ui.radar.refill(); const n = ctx.net; if (n?.role === 'host' && n.room) ui.notify({ title: `Room ${n.room}`, text: 'Friends can join with this code. Invite link is in the pause menu.', kind: 'info', ttl: 9 }); void o; });
   E.on('game:quit', () => { ui.ready = false; hud.subtitle(null); });
-  E.on('player:swept', () => { if (ctx.state !== 'playing') return; if (hud.chatOpen) hud.closeChat(); setTimeout(() => { if (ctx.gameplay?.swept) ui.openScreen('swept', { replace: true }); }, 1400); });
+  E.on('player:blackout', () => { if (ctx.state !== 'playing') return; if (hud.chatOpen) hud.closeChat(); setTimeout(() => { if (ctx.gameplay?.swept) ui.openScreen('swept', { replace: true }); }, 400); });
   E.on('player:respawn', () => { if (curName === 'swept') { ui.forceClose(); ui.capture(); } });
   E.on('net:status', (d) => { if (!d) return; if (d.state === 'idle' && curName === 'lobby' && !d.left) { waitingStart = false; ui.openScreen('main'); if (d.error) ui.notify({ title: 'Room closed', text: d.error, kind: 'warn' }); } });
   E.on('net:ended', () => { waitingStart = false; });

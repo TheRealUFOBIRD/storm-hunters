@@ -42,8 +42,10 @@ export async function create(ctx) {
     lateUpdate(dt) { camera(dt); },
   };
   ctx.events.on('lightning', (e) => { const d = Math.hypot(e.x - P.pos.x, e.z - P.pos.z); P.thunder = Math.max(P.thunder || 0, clamp(1 - d / 6000) * (e.energy ?? 1)); P.thunderDelay = d / 343; });
-  ctx.events.on('vehicle:swept', (e) => { if (e.v === P.vehicle) { ctx.events.emit('player:swept', { inVehicle: true, v: e.v }); P.vSwept = 0.001; } });
-  ctx.events.on('vehicle:landed', (e) => { if (e.v === P.vehicle && P.vSwept) { P.vSwept = 0; P.damage(0.35 + e.v.damage * 0.3, 'tornado'); P.startBlackout(); } });
+  // Being lofted in a vehicle is not a game over: the car is thrown around physically with the player inside, the
+  // landing hurts (non-lethally) and the wrecked car is the player's problem (R recovers it).
+  ctx.events.on('vehicle:swept', (e) => { if (e.v === P.vehicle) { P.vSwept = 0.001; P.vSweptDmg = e.v.damage || 0; ctx.events.emit('player:thrown', { v: e.v }); } });
+  ctx.events.on('vehicle:landed', (e) => { if (e.v === P.vehicle && P.vSwept) { P.vSwept = 0; const hit = clamp((e.v.damage || 0) - (P.vSweptDmg || 0)) * 0.6 + 0.08; P.health = Math.max(0.1, P.health - hit); ctx.events.emit('player:damage', { amount: hit, health: P.health, cause: 'tornado' }); P.shake = Math.max(P.shake || 0, 2); } });
 
   function inVehicle(v, x, y, z, r) { const b = v.body, M = b.M, bx = b.box, X = x - b.p.x, Y = y - b.p.y, Z = z - b.p.z; const lx = M[0] * X + M[3] * Y + M[6] * Z, ly = M[1] * X + M[4] * Y + M[7] * Z - bx.cy, lz = M[2] * X + M[5] * Y + M[8] * Z - bx.cz; return Math.abs(lx) < bx.hx + r && Math.abs(lz) < bx.hz + r && Math.abs(ly) < bx.hy + 1; }
 
@@ -54,7 +56,7 @@ export async function create(ctx) {
     if (P.mode === 'drive' && P.vehicle) {
       const b = P.vehicle.body; P.pos.copy(b.rp); P.health = Math.min(1, P.health + dt * 0.002);
       if (I.pressed('enter')) P.exit(); if (I.pressed('camera')) { const order = ['chase', 'cockpit', 'hood']; P.setCameraMode(order[(order.indexOf(P.driveCam) + 1) % order.length]); }
-      if (P.vSwept) { P.vSwept += dt; if (P.vSwept > 14) { P.vSwept = 0; P.startBlackout(); } }
+      if (P.vSwept) { P.vSwept += dt; if (P.vSwept > 30 && !P.vehicle.body.airborne) P.vSwept = 0; }
       return;
     }
     if (P.mode === 'foot') foot(dt); else if (P.mode === 'swept') swept(dt);
@@ -107,7 +109,8 @@ export async function create(ctx) {
     const gy = W.heightAt(s.p.x, s.p.z) + 0.25; if (s.p.y < gy) { s.p.y = gy; const imp = -s.v.y + Math.hypot(s.v.x, s.v.z) * 0.3; if (imp > 6) { P.damage(imp * imp * 0.0009, 'tornado'); s.hits++; ctx.events.emit('player:impact', { speed: imp }); } s.v.y = Math.abs(s.v.y) * 0.25; s.v.x *= 0.6; s.v.z *= 0.6; s.w.multiplyScalar(0.6); }
     const L = P.colliders; L.length = 0; W.queryColliders?.(s.p.x, s.p.z, 2, L); for (const c of L) { if (c.broken) continue; const d = Math.hypot(s.p.x - c.x, s.p.z - c.z); if (d < (c.r || Math.max(c.hx, c.hz)) + 0.4 && s.p.y < c.y + (c.h || (c.hy || 2) * 2)) { const sp = s.v.length(); if (sp > 6) P.damage(sp * sp * 0.0012, 'tornado'); s.v.multiplyScalar(-0.3); } }
     P.pos.copy(s.p); P.pos.y -= 1; const sp = s.v.length(); if (s.p.y - gy < 0.3 && sp < 2.5 && WIND.length() < 30) s.rest += dt; else s.rest = 0;
-    if ((s.rest > 1.5 || s.t > 25 || P.health <= 0) && !P.blackoutT) { if (P.health < 0.4 || s.hits > 2 || s.t > 25) P.startBlackout(); else { P.swept = null; P.pos.y = W.heightAt(P.pos.x, P.pos.z); P.vel.set(0, 0, 0); P.character?.setState({ tumble: 0 }); P.setMode('foot'); P.cameraMode = 'foot'; P.knocked = 0; } }
+    // only an actual death (health 0) ends in a blackout; otherwise the chaser lands, gets up and carries on
+    if ((s.rest > 1.5 || s.t > 40 || P.health <= 0) && !P.blackoutT) { if (P.health <= 0) P.startBlackout(); else { P.swept = null; P.pos.y = W.heightAt(P.pos.x, P.pos.z); P.vel.set(0, 0, 0); P.character?.setState({ tumble: 0 }); P.setMode('foot'); P.cameraMode = 'foot'; P.knocked = 0; } }
     ensureChar(); const o = P.character.object3d; o.visible = true; o.position.copy(s.p).add(V2.set(0, -0.9, 0).applyQuaternion(s.q)); o.quaternion.copy(s.q); P.character.update(dt);
   }
   function ensureChar() { if (!P.character) { P.character = createCharacterVisual(0xc8541a); ctx.scene.add(P.character.object3d); } }

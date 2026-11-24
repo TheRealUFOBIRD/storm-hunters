@@ -42,7 +42,7 @@ export function createGrass(ctx, S) {
       float hgt=iC.w*(.65+.6*fract(rnd*13.7+aS.y))*fade; float ang=rnd*6.2832; float ca=cos(ang),sa=sin(ang);
       vec3 p=vec3(position.x*ca-position.z*sa,0.,position.x*sa+position.z*ca); float wid=mix(1.,2.6,smoothstep(8.,uN.y,dc))*(iC.w>1.2?3.:1.); p.xz*=wid;
       float t=position.y; ${BEND}
-      vec3 transformed=wb+vec3(p.x+off.x+(rnd-.5)*.2*t*hgt,yy,p.z+off.y); vCol=iC.rgb; vT=t;`)
+      vec3 transformed=wb+vec3(p.x+off.x+(rnd-.5)*.2*t*hgt,yy,p.z+off.y); vCol=iC.rgb; vT=t;${typeof location!=='undefined'&&location.search.includes('grassdbg')?'vCol=vec3(0.,0.,.5);':''}`)
       .replace('#include <project_vertex>', 'vec4 mvPosition=viewMatrix*vec4(transformed,1.); gl_Position=projectionMatrix*mvPosition; if(fade<=0.) gl_Position=vec4(2.,2.,2.,1.);')
       .replace('#include <worldpos_vertex>', 'vec4 worldPosition=vec4(transformed,1.);');
     FRAG(sh);

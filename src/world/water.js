@@ -82,6 +82,7 @@ function auxTex(N, h, seed) {
 // ---------------------------------------------------------------- shaders
 const VS = /* glsl */`
 attribute vec4 aW; // flow.xz (m/s), type, across (-1..1)
+attribute float aM; varying float vM; // aM: per-vertex visibility (0 over roads / perched banks)
 uniform vec4 uGw[5]; uniform float uGQ, uTime; uniform sampler2D uDep; uniform vec4 uDepXf;
 varying vec3 vWp; varying vec4 vW; varying vec3 vGN; varying vec2 vMac;
 void main(){
@@ -94,7 +95,7 @@ void main(){
       d.xz += qa*g.xy*c; d.y += a*s; nn.xz += g.xy*k*a*c; nn.y += k*qa*s; }
     wp.xyz += d; n = normalize(vec3(-nn.x, 1.-nn.y, -nn.z));
   }
-  vWp = wp.xyz; vW = aW; vGN = n;
+  vWp = wp.xyz; vW = aW; vGN = n; vM = aM;
   gl_Position = projectionMatrix*viewMatrix*wp;
 }`;
 
@@ -118,7 +119,7 @@ uniform sampler2D uNrm, uAux, uDepth, uColor, uVol, uDep; uniform vec4 uDepXf;
 uniform vec4 uDepthK, uAmp, uTor, uLightning; uniform vec2 uRes, uWindDir, uWind; uniform mat4 uVP;
 uniform float uTime, uRain, uGust, uWc, uStormDark, uHasCol, uHasVol, uEnvOn, uFlowT;
 uniform vec3 uSunDir, uSunColor, uAmbient; uniform vec3 uAlb[8], uExt[8];
-varying vec3 vWp; varying vec4 vW; varying vec3 vGN; varying vec2 vMac;
+varying vec3 vWp; varying vec4 vW; varying vec3 vGN; varying vec2 vMac; varying float vM; uniform vec4 uSpot[2], uSpotD[2];
 
 float ign(vec2 p){ return fract(52.9829189*fract(dot(p, vec2(.06711056,.00583715)))); }
 float h12(vec2 p){ vec3 q=fract(vec3(p.xyx)*.1031); q+=dot(q,q.yzx+33.33); return fract((q.x+q.y)*q.z); }
@@ -227,7 +228,14 @@ void main(){
   float ag = clamp(a2, .0012, 1.), dd = NoH*NoH*(ag-1.)+1., D = ag/(PI*dd*dd); float Vis = .5/(NoL*sqrt(NoV*NoV*(1.-ag)+ag) + NoV*sqrt(NoL*NoL*(1.-ag)+ag) + 1e-5);
   vec3 spec = uSunColor*PI*NoL*min(D*Vis, 900.)*schlick(VoH, .02)*(under ? 0. : 1.);
   // ---------------- body (single scattering approx), foam
-  vec3 Eb = uSunColor*max(L.y,0.)*.95 + uAmbient; vec3 Lb = alb*Eb;
+  vec3 Eb = uSunColor*max(L.y,0.)*.95 + uAmbient;
+  // vehicle headlights (spot lights of the local car): diffuse into the water body + specular highlight
+  vec3 Eh = vec3(0.);
+  for(int i=0;i<2;i++){ vec4 sp = uSpot[i]; if(sp.w <= 0.) continue; vec3 Ld = sp.xyz-P; float d2 = dot(Ld,Ld), dl = sqrt(d2); Ld /= dl;
+    float cone = smoothstep(uSpotD[i].w, uSpotD[i].w+.06, dot(-Ld, uSpotD[i].xyz)); float I = sp.w*cone/max(d2,1.)*pow(sat(1.-dl/95.),2.); if(I <= 0.) continue;
+    vec3 Hh = normalize(Ld+V); float nl = max(dot(N,Ld),0.), nh = max(dot(N,Hh),0.), e2 = nh*nh*(ag-1.)+1.;
+    vec3 lc = vec3(1.,.95,.87)*I; Eh += lc*max(Ld.y,0.)/PI; spec += lc*nl*min(ag/(PI*e2*e2)*.25/max(nl*NoV,.05),900.)*schlick(max(dot(V,Hh),0.),.02); }
+  Eb += Eh; vec3 Lb = alb*Eb;
   vec3 T = exp(-ext*(path + depthV));
   float foam = 0.;
   {
@@ -246,14 +254,17 @@ void main(){
     foam = max(foam, tor*smoothstep(.2,.7,fp)*1.2);
     foam = sat(foam)*(1.-smoothstep(1500.,5000.,dist)*.6);
   }
-  vec3 Lfoam = .8*(uSunColor*(NoL*.8+.2*max(L.y,0.)) + uAmbient);
+  vec3 Lfoam = .8*(uSunColor*(NoL*.8+.2*max(L.y,0.)) + uAmbient + Eh);
   // ---------------- composite
   vec3 surf = F*refl + spec + (1.-F)*(vec3(1.)-T)*Lb;
   surf = mix(surf, Lfoam, foam);
-  float edge = smoothstep(0., .05 + dist*.0012, depthV);
+  float edge = smoothstep(0., .08 + dist*.0015, depthV);
+  bool river = dot(vW.xy,vW.xy) > 1e-6;
+  // per-vertex mask: never over roads/shoulders or where the bank is missing; soft ribbon border
+  if(river) edge *= smoothstep(.15,.85,vM)*(1.-smoothstep(.82,1.,abs(vW.w)));
   { vec4 mk = texture2D(uDep, (P.xz-uDepXf.xy)*uDepXf.zw); // clip ocean / lake planes to the real coast / shore
     if(ty==0) edge *= 1.-smoothstep(150., 260., (mk.a*255.-128.)*8.);
-    else if(abs(vW.w) < .5) edge *= 1.-smoothstep(20., 70., (mk.b*255.-128.)*8.);
+    else if(!river) edge *= 1.-smoothstep(20., 70., (mk.b*255.-128.)*8.);
     if(edge < .002) discard; }
   vec3 col;
 #ifdef PIPE
@@ -311,6 +322,7 @@ export function createWater(ctx, S, shared) {
     uTime: G.uTime, uRain: G.uRain, uGust: G.uGust || { value: 0 }, uStormDark: G.uStormDark || { value: 0 }, uSunDir: G.uSunDir, uSunColor: G.uSunColor, uAmbient: G.uAmbient, uLightning: G.uLightning || { value: V4() },
     uWind: { value: new THREE.Vector2(4, 1) }, uWindDir: { value: new THREE.Vector2(1, 0) },
     uNrm: { value: nrm }, uAux: { value: aux }, uDep: { value: dt }, uDepXf: { value: new THREE.Vector4(OX - CELL / 2, OZ - CELL / 2, 1 / (CELL * GX), 1 / (CELL * GZ)) },
+    uSpot: { value: [V4(), V4()] }, uSpotD: { value: [V4(), V4()] },
     uGw: { value: [V4(), V4(), V4(), V4(), V4()] }, uGQ: { value: .5 }, uAmp: { value: V4() }, uWc: { value: 0 }, uTor: { value: V4() }, uFlowT: { value: .33 },
     uAlb: { value: TYPES.map((t) => new THREE.Vector3(...t.alb)) }, uExt: { value: TYPES.map((t) => new THREE.Vector3(...t.ext)) },
     uDepth: PIPE ? gfx.depthTexture : { value: null }, uDepthK: PIPE ? gfx.depthParams : { value: V4() }, uRes: PIPE ? gfx.resolution : { value: new THREE.Vector2(1, 1) },
@@ -338,7 +350,7 @@ export function createWater(ctx, S, shared) {
     if (e.image.height !== envH) { envH = e.image.height; const maxMip = Math.log2(envH) - 2; Object.assign(m.defines, { ENV_CUBEUV: 1, CUBEUV_TEXEL_WIDTH: (1 / (3 * Math.max(2 ** maxMip, 7 * 16))).toFixed(9), CUBEUV_TEXEL_HEIGHT: (1 / envH).toFixed(9), CUBEUV_MAX_MIP: maxMip.toFixed(1) }); m.needsUpdate = true; }
   }
   const add = (geo, ro = 0) => { const mm = new THREE.Mesh(geo, m); mm.renderOrder = ro; mm.onBeforeRender = hook; mm.receiveShadow = false; group.add(mm); return mm; };
-  const mk = (pos, w4, idx) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('aW', new THREE.Float32BufferAttribute(w4, 4)); g.setIndex(idx); g.computeBoundingSphere(); return g; };
+  const mk = (pos, w4, idx, msk) => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('aW', new THREE.Float32BufferAttribute(w4, 4)); g.setAttribute('aM', new THREE.Float32BufferAttribute(msk || new Float32Array(pos.length / 3).fill(1), 1)); g.setIndex(idx); g.computeBoundingSphere(); return g; };
 
   // ---- ocean: radial grid around the camera (dense near, out to the far plane)
   const P = [], I = [], NA = 160, GROW = 1.06; let rad = 0; const radii = [0]; for (rad = 2.5; rad < 58000; rad *= GROW) radii.push(rad); radii.push(58000);
@@ -353,24 +365,35 @@ export function createWater(ctx, S, shared) {
     const tri = ShapeUtils.triangulateShape(pts, []), pos = [], w4 = [], idx = [], ty = lakeType(L.name); for (const p of pts) { pos.push(p.x, L.level, p.y); w4.push(0, 0, ty, 0); } for (const t of tri) idx.push(t[0], t[2], t[1]);
     add(mk(pos, w4, idx), -1);
   }
-  // ---- rivers: ribbons with flow direction (downstream = decreasing water level); wider rivers sit a hair higher at confluences
-  const ranked = [...data.rivers].sort((a, b) => Math.max(...a.w) - Math.max(...b.w));
+  // ---- rivers: dense ribbons (~8 m rows x 9 columns) with flow direction (downstream = decreasing level). Per-vertex mask aM hides
+  // the water over road carriageways/shoulders (fords, roads graded below the river) and where the bank is missing (perched water).
+  const ranked = [...data.rivers].sort((a, b) => Math.max(...a.w) - Math.max(...b.w)), O = S.O, sst = (a, b, v) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
   const inLake = (x, z, y) => { const i = Math.round((x - OX) / CELL), j = Math.round((z - OZ) / CELL); if (i < 0 || j < 0 || i >= GX || j >= GZ || !data.lakeI) return false; const li = data.lakeI[j * GX + i]; return li !== 255 && data.lakes[li].level > .5 && y <= data.lakes[li].level + .6 && S.groundAt(x, z) < data.lakes[li].level; };
+  const COLS = [-1, -.8, -.55, -.28, 0, .28, .55, .8, 1], NC = COLS.length; let riverVerts = 0, masked = 0;
   ranked.forEach((r, rank) => {
-    const n = r.y.length; if (n < 2) return; const down = r.y[n - 1] <= r.y[0] ? 1 : -1, ty = riverType(r.name), yo = .02 + rank * .012;
-    const pos = [], w4 = [], idx = []; let run = 0;
-    for (let i = 0; i < n; i++) {
-      const x = r.pts[i * 2], z = r.pts[i * 2 + 1]; if (inLake(x, z, r.y[i])) { run = 0; continue; }
-      const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = r.pts[b * 2] - r.pts[a * 2], tz = r.pts[b * 2 + 1] - r.pts[a * 2 + 1]; const l = Math.hypot(tx, tz) || 1; tx /= l; tz /= l;
-      const slope = Math.abs(r.y[b] - r.y[a]) / l, sp = Math.min(2.6, .55 + Math.sqrt(r.w[i]) * .06 + slope * 900) * down, w = r.w[i] / 2 + 6;
-      for (const s of [-1, 1]) { pos.push(x - tz * w * s, r.y[i] + yo, z + tx * w * s); w4.push(tx * sp, tz * sp, ty, s); }
-      const v = pos.length / 3 - 2; if (run) idx.push(v - 2, v, v - 1, v - 1, v, v + 1); run++;
+    const n = r.y.length; if (n < 2) return; const down = r.y[n - 1] <= r.y[0] ? 1 : -1, ty = riverType(r.name), yo = .01 + rank * .004;
+    const tan = (i) => { const a = Math.max(0, i - 1), b = Math.min(n - 1, i + 1); let tx = r.pts[b * 2] - r.pts[a * 2], tz = r.pts[b * 2 + 1] - r.pts[a * 2 + 1]; const l = Math.hypot(tx, tz) || 1; return [tx / l, tz / l, Math.abs(r.y[b] - r.y[a]) / l]; };
+    const pos = [], w4 = [], mm = [], idx = []; let run = 0;
+    const row = (x, z, y, hw, tx, tz, slope) => {
+      if (inLake(x, z, y)) { run = 0; return; }
+      const sp = Math.min(2.6, .55 + Math.sqrt(hw * 2) * .06 + slope * 900) * down, W = hw + 6;
+      for (const s of COLS) { const px = x - tz * W * s, pz = z + tx * W * s, h = S.heightAt(px, pz), rc = Math.min(O.eMaj, O.eStr, O.eGrv);
+        let k = O.deck ? 1 : sst(2, 6, rc); if (Math.abs(s) * W > hw && h < y - .12) k = 0; if (k < .5) masked++;
+        pos.push(px, y + yo, pz); w4.push(tx * sp, tz * sp, ty, s); mm.push(k); }
+      const v = pos.length / 3 - NC; if (run) for (let c = 0; c < NC - 1; c++) { const a = v - NC + c, b = v + c; idx.push(a, b, a + 1, a + 1, b, b + 1); } run++;
+    };
+    for (let i = 0; i < n - 1; i++) {
+      const x0 = r.pts[i * 2], z0 = r.pts[i * 2 + 1], x1 = r.pts[i * 2 + 2], z1 = r.pts[i * 2 + 3], L = Math.hypot(x1 - x0, z1 - z0), K = Math.max(1, Math.ceil(L / 8)), t0 = tan(i), t1 = tan(i + 1);
+      for (let k = 0; k < K + (i === n - 2 ? 1 : 0); k++) { const f = k / K; let tx = t0[0] + (t1[0] - t0[0]) * f, tz = t0[1] + (t1[1] - t0[1]) * f; const l = Math.hypot(tx, tz) || 1;
+        row(x0 + (x1 - x0) * f, z0 + (z1 - z0) * f, r.y[i] + (r.y[i + 1] - r.y[i]) * f, (r.w[i] + (r.w[i + 1] - r.w[i]) * f) / 2, tx / l, tz / l, t0[2]); }
     }
-    if (idx.length) add(mk(pos, w4, idx), 0);
+    riverVerts += pos.length / 3; if (idx.length) add(mk(pos, w4, idx, mm), 0);
   });
+  console.log(`[water] rivers: ${riverVerts} verts, ${masked} masked (roads / missing banks)`);
 
   // ---- per-frame state
   const wind = new THREE.Vector2(4, 1); let wsS = 4;
+  const _a = new THREE.Vector3(), _b = new THREE.Vector3();
   const spray = []; // tornadoes currently over water: [{x,z,y,r,amount}] (hook for FX spray)
   function update() {
     const c = ctx.camera.position; ocean.position.set(Math.round(c.x / 2) * 2, 0, Math.round(c.z / 2) * 2); ocean.visible = S.coastAt(c.x, c.z) < 45000;
@@ -386,6 +409,9 @@ export function createWater(ctx, S, shared) {
     for (let i = 0; i < 5; i++) { const [lam, da, sh] = spec[i], a = wa + da, k = 2 * Math.PI / lam; gws[i].set(Math.cos(a), Math.sin(a), k, Hs * .5 * sh); }
     u.uGQ.value = .55 + .3 * THREE.MathUtils.smoothstep(wsS, 5, 18);
     // nearest tornado over water
+    // local car headlights (vehicle system SpotLights) so night water near the car is lit like the ground
+    const spots = ctx.vehicles?.spots; for (let i = 0; i < 2; i++) { const s = spots?.[i], o = u.uSpot.value[i], od = u.uSpotD.value[i]; if (!s || !s.visible || !(s.intensity > 0) || !s.parent) { o.w = 0; continue; }
+      s.getWorldPosition(_a); s.target.getWorldPosition(_b); _b.sub(_a).normalize(); o.set(_a.x, _a.y, _a.z, s.intensity); od.set(_b.x, _b.y, _b.z, Math.cos(s.angle)); }
     spray.length = 0; const T = ctx.storms?.tornadoes; let best = 1e18; u.uTor.value.set(0, 0, 1, 0);
     if (T) for (const t of T) { if (!t || t.stage === 'dead' || t.stage === 'funnel') continue; const wl = S.waterLevelAt(t.x, t.z); if (wl === -Infinity) continue; const amt = (t.strength ?? .5) * Math.min(1, t.condense ?? 1); spray.push({ x: t.x, z: t.z, y: wl, r: Math.max(20, t.rCore || 40), amount: amt });
       const d = (t.x - c.x) ** 2 + (t.z - c.z) ** 2; if (d < best) { best = d; u.uTor.value.set(t.x, t.z, Math.max(20, t.rCore || 40), amt); } }
